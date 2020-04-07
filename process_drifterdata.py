@@ -1,18 +1,27 @@
 """
-Script to process the 6h drifter data
+Script to process the 6 hourly drifter data:
+    1. Limit drifters to those starting in North Atlantic
+    2. Creates data set of similar trajectory lengths and uniform initial conditions
 """
 
 import matplotlib.pyplot as plt
 import numpy as np
 from datetime import datetime, timedelta
 from mpl_toolkits.basemap import Basemap
-
+from create_network import trajectory_data
+import random
 
 def constrain_to_north_atlantic():
-        
+    """
+    ---------------------------------------------------------------------
+    Create file with only those drifters that start in the North Atlantic
+    ---------------------------------------------------------------------
+    """        
+
     """
     Load data
     """
+    
     data_directory = '../drifter_data/drifters_6h_200318/'
     datafiles = [data_directory + 'buoydata_1_5000.dat',
                   data_directory + 'buoydata_5001_10000.dat',
@@ -73,8 +82,9 @@ def constrain_to_north_atlantic():
     lons_initial = np.array([LON[ID == i][0] for i in unique_ids])
     lats_initial = np.array([LAT[ID == i][0] for i in unique_ids])
      
+    
     """
-    Plot iniial positions
+    Plot initial positions
     """
     plt.figure(figsize=(12,8))
     m = Basemap(projection='robin',lon_0=0,resolution='c')
@@ -84,7 +94,6 @@ def constrain_to_north_atlantic():
     plt.title('Initial position whole data set')
     xs, ys = m(lons_initial, lats_initial)
     m.scatter(xs, ys, s=2)
-    
     
     """
     Select drifter IDs corresponding to North Atlantic
@@ -140,10 +149,10 @@ def constrain_to_north_atlantic():
               V = V_north_atlantic)
      
 
-"""
-Check if saved data is correct
-"""
 def check_data():
+    """
+    Check if saved data is correct
+    """
     data = np.load('drifter_data_north_atlantic/drifterdata_north_atlantic.npz', allow_pickle=True)
     lon = data['lon']
     lat = data['lat']
@@ -163,4 +172,121 @@ def check_data():
     plt.title('Initial positions of drifters starting in North Atlantic')
     xs, ys = m(lon0, lat0)
     m.scatter(xs, ys, s=2)
+
+
+def create_coherent_monthly_drifter_data():
+    """
+    Create data set with drifters starting in a certain month and trajectories 
+    of certain length. This only takes into account the month (not e.g. the first of the month).
+    - It is assumed that the data is 6-hourly
     
+    """
+    
+    data = np.load('drifter_data_north_atlantic/drifterdata_north_atlantic.npz', allow_pickle=True)
+    lon = data['lon']
+    lat = data['lat']
+    time = data['time']
+    time_full = [np.array([timedelta(seconds = time[i][j]) + datetime(1900, 1, 1, 0, 0) 
+                           for j in range(len(time[i]))]) for i in range(len(time))]
+    
+    for month_start in [1,4,7,10]:
+        for trajectory_lenght_days in [60,120,180,360]:
+            
+            lons = []
+            lats = []
+            t = []
+            trajectory_lenghts_n = trajectory_lenght_days * 4
+            
+            for i in range(len(lon)):
+                if i%50==0: print(i)
+                months = np.array([time_full[i][j].month for j in range(len(time_full[i]))])
+                if np.any(months==month_start): 
+                    i0 = np.argwhere(months==month_start)[0][0]
+                    K = len(months[i0:])//trajectory_lenghts_n
+                    for k in range(K):
+                        lons += [lon[i][i0 + trajectory_lenghts_n * k :i0+ + trajectory_lenghts_n * (k+1) ]]
+                        lats += [lat[i][i0 + trajectory_lenghts_n * k :i0+ + trajectory_lenghts_n * (k+1) ]]
+                        t += [time_full[i][i0 + trajectory_lenghts_n * k :i0+ + trajectory_lenghts_n * (k+1) ]]
+    
+            np.savez('drifter_data_north_atlantic/time_coherent_drifters_month_start' + str(month_start) 
+                     + 'length_days_' + str(trajectory_lenght_days), lon = lons, lat = lats, time=t)
+
+
+def create_month_aggregated_coherent_drifter_data():
+    
+    """
+    Same as create_coherent_monthly_drifter_data, but aggregated over all starting months
+    """
+    
+    data = np.load('drifter_data_north_atlantic/drifterdata_north_atlantic.npz', allow_pickle=True)
+    lon = data['lon']
+    lat = data['lat']
+    time = data['time']
+    time_full = [np.array([timedelta(seconds = time[i][j]) + datetime(1900, 1, 1, 0, 0) 
+                           for j in range(len(time[i]))]) for i in range(len(time))]
+    
+    # for trajectory_lenght_days in [60,120,180,360]:    
+    trajectory_lenght_days = 365
+    lons = []
+    lats = []
+    t = []
+    
+    trajectory_lenghts_n = trajectory_lenght_days * 4
+    
+    for month_start in range(1,13):
+        
+        for i in range(len(lon)):
+            if i%50==0: print(i)
+            months = np.array([time_full[i][j].month for j in range(len(time_full[i]))])
+            if np.any(months==month_start): 
+                i0 = np.argwhere(months==month_start)[0][0]
+                K = len(months[i0:])//trajectory_lenghts_n
+                for k in range(K):
+                    lons += [lon[i][i0 + trajectory_lenghts_n * k :i0+ + trajectory_lenghts_n * (k+1) ]]
+                    lats += [lat[i][i0 + trajectory_lenghts_n * k :i0+ + trajectory_lenghts_n * (k+1) ]]
+                    t += [time[i][i0 + trajectory_lenghts_n * k :i0+ + trajectory_lenghts_n * (k+1) ]]
+    
+    
+    np.savez('drifter_data_north_atlantic/time_coherent_drifters_combined_'
+                 + 'length_days_' + str(trajectory_lenght_days), drifter_longitudes = lons, drifter_latitudes = lats, 
+                 drifter_time=t)
+
+
+def create_uniformized_dataset(d_deg=1.):
+    """
+    Function to create a uniformized data set by selecting exactly one trajectory starting
+    in each box of size d_deg
+    """
+    
+    #Load data, but only daily positions, and plot
+    drifter_data = trajectory_data.from_npz('drifter_data_north_atlantic/time_coherent_drifters_combined_length_days_365.npz',
+                                            n_step=4)
+    print('Size before: ', drifter_data.N)
+    f, ax = plt.subplots(figsize=(10,10))
+    drifter_data.compute_initial_symbols(d_deg = d_deg)
+    drifter_data.plot_discretized_distribution(drifter_data.initial_distribution, ax,
+                                               logarithmic = True)
+    
+    #Get initil symbols
+    initial_symbols = drifter_data.initial_symbols
+    unique_initial_symbols, initial_symbol_counts = np.unique(initial_symbols, return_counts=True)
+
+    #Loop  over symbols and check where there is more than one initial conditions. 
+    #In that case, randomly select one
+    drifter_indices = []
+    for i_s in unique_initial_symbols:
+        drifter_indices_i_s = np.argwhere(initial_symbols==i_s)[:,0]
+        drifter_index_select = random.choice(drifter_indices_i_s)
+        drifter_indices += [drifter_index_select]
+        
+    drifter_data.restrict_to_subset(drifter_indices)    
+    print('Size after: ', drifter_data.N)
+    
+    f, ax = plt.subplots(figsize=(10,10))
+    
+    drifter_data.compute_initial_symbols(d_deg = d_deg)
+    drifter_data.plot_discretized_distribution(drifter_data.initial_distribution, ax,
+                                               logarithmic = False)
+    
+    drifter_data.save_to_npz('drifter_data_north_atlantic/uniformized_dataset_365days_1deg_uniform')
+

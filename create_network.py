@@ -1,10 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-Classes to process drifter data into networks / datasets for unsupervised learning.
-IMPORTANT NOTES:
-    - time interval of 6h is assumed
+Classes to process drifter data:
+    - Class domain: specify the region of interest (here North Atlantic).
+    - Class trajectory data: handle lon/lat/time drifter data and construct networks from them
+    - Class undirected_network: network analysis, mostly spectral clustering, of an undirected network
 
+Notes:
+    - If applied to other regions than north atlantic, adjust the data set and the domain
 """
+
 import matplotlib.colors as colors
 import numpy as np
 import matplotlib.pyplot as plt
@@ -12,23 +16,32 @@ from scipy import sparse
 from mpl_toolkits.basemap import Basemap
 from scipy.sparse import coo_matrix
 from datetime import datetime, timedelta
-from scipy import sparse
 import scipy.sparse
 import networkx as nx
-from scipy.sparse.linalg import eigs
+from sklearn.cluster import KMeans
 
-class domain(object):    
+
+class domain(object):
     """
-    Class to contain the domain and grids for plotting
+    Class containing the domain and grids for plotting.
     """
     
-    def __init__(self, minlon, maxlon, minlat, maxlat, domaintype):
+    def __init__(self, minlon, maxlon, minlat, maxlat,
+                 minlon_plot, maxlon_plot, minlat_plot, maxlat_plot,
+                 parallels, meridians):
         self.minlon = minlon
         self.maxlon = maxlon
         self.minlat = minlat
         self.maxlat = maxlat
-        self.domaintype = domaintype
-       
+        
+        #For plotting
+        self.minlon_plot = minlon_plot
+        self.maxlon_plot = maxlon_plot
+        self.minlat_plot = minlat_plot
+        self.maxlat_plot = maxlat_plot
+        self.parallels = parallels
+        self.meridians = meridians
+        
     def setup_grid(self, d_deg):
         self.d_deg = d_deg
         self.Lons_edges = np.linspace(self.minlon,self.maxlon,int((self.maxlon-self.minlon)/d_deg)+1) 
@@ -40,35 +53,42 @@ class domain(object):
     @classmethod
     def north_atlantic_domain(cls):
         (minlon, maxlon, minlat, maxlat) = (-120., 80., 0., 90.)
-        return cls(minlon, maxlon, minlat, maxlat, domaintype='north_atlantic')
+        (minlon_plot, maxlon_plot, minlat_plot, maxlat_plot) = (-100., 40., 0., 85.)
+        (parallels, meridians) = ([20,40,60,80],[-70,-40,-10,20,50])
+        return cls(minlon, maxlon, minlat, maxlat, 
+                   minlon_plot, maxlon_plot, minlat_plot, maxlat_plot,
+                   parallels, meridians)
 
 
 class trajectory_data(object):
     """
     Class to
-    - handle drifter data and compute the networkd / datasets used for unsupervised learning
-    - plot a field over North Atlantic Ocean
+    - handle drifter data
+    - compute the networks used for clustering
+    - plot data, e.g. a field over North Atlantic Ocean
     """
     
     def __init__(self, drifter_longitudes=[], drifter_latitudes=[], 
-                 drifter_time=[], drifter_SST = [], drifter_speed = [], 
-                 drifter_id=[], data_description = "no description",
-                 set_nans = True):
+                 drifter_time=[], drifter_id=[], time_0 =  datetime(1900, 1, 1, 0, 0), 
+                 time_interval_days=0.25, set_nans = True):
         """
-        drifter_longitudes: format is len-N list of numpy arrays, each array containing the data.
-        Similar for drifter_latitudes, drifter_time (datetime.timestamp), drifter_SST, drifter_speed.
-        drifter_time is ASSUMED TO BE in 6h intervals
-        drifter_id: len-N list of ID's
-        data_description: option to specify what kind of data it is
-        set_nans: Some drifters have erroneous data. If True, this data is set to nan
+        Parameters:
+        - drifter_longitudes: format is len-N list of numpy arrays, each array containing the data of a trajectory.
+        Similar for drifter_latitudes, drifter_time (seconds since time_0).
+        - drifter_id: len-N list of drifter ID's. ID is not used at any point in the analysis.
+        - time_0: reference time. time unit is in seconds since then.
+        - time_interval_days: this is the time step between two measurements. Default is 6 hours
+        - set_nans: Some drifters have erroneous data. If True, this data is set to nan.
         """
 
         self.drifter_longitudes = drifter_longitudes
         self.drifter_latitudes = drifter_latitudes
         self.drifter_time = drifter_time
         self.drifter_id = drifter_id
-        self.N = len(drifter_id)
-        self.data_description = data_description
+        self.N = len(drifter_longitudes)
+        self.time_interval_days = time_interval_days
+        self.time_0 = time_0
+        self.domain = domain.north_atlantic_domain()
         
         if set_nans:
             self.set_nans()
@@ -76,40 +96,91 @@ class trajectory_data(object):
         else:
             self.nans_set = False
     
-        self.discretized = False #No partition is defined in the beginning
+        self.discretized = False #True of partition into bins is defined
     
     
-    def set_nans(self):
+    @classmethod
+    def from_npz(cls, filename, time_interval_days=None, n_step=1):
         """
-        The drifter data contains some empty data (where lon / lat are very large)
+        Load data from .npz file:
+            - filename has to contain: drifter_longitudes, drifter_latitudes, drifter_time
+            - time_interval_days: the days between different data points of the loaded data
+            - n_step: can restrict to every n_step'th data point. E.g. if data is 
+            6-hourly (time_interval_days=0.25) and n_step=4, then trajectory_data object will be daily
         """
-        print('Setting erroneous data points to nan')
         
+        if time_interval_days==None: time_interval_days = n_step * 0.25
+        data = np.load(filename, allow_pickle = True)
+        lon = data['drifter_longitudes'][:,::n_step]
+        lat = data['drifter_latitudes'][:,::n_step]
+        time = data['drifter_time'][:,::n_step]
+        return cls(drifter_longitudes = lon, drifter_latitudes=lat, drifter_time = time,
+                   time_interval_days=time_interval_days)
+        
+    
+    def set_nans(self, N_nans=0):
+        """
+        The drifter data contains some empty data (where lon / lat are >600).
+        Parameters:
+            - N_nans: number of allowed nans per trajectory. Default is no nan.
+        """
+        
+        print('Setting erroneous lon/lat  data points to nan')
         n_data_errors = 0
-        
+        remove_indices = []
         for i in range(self.N):
             n_data_errors += len(self.drifter_longitudes[i][self.drifter_longitudes[i]>180])
             self.drifter_latitudes[i][self.drifter_longitudes[i]>180]=np.nan
             self.drifter_longitudes[i][self.drifter_longitudes[i]>180]=np.nan
-            
-        print("found " + str(n_data_errors) + " nans")            
+            if len(np.argwhere(np.isnan(self.drifter_longitudes[i])))>N_nans:
+                remove_indices += [i]
+        
+        print('Number of trajectories containing nans:', len(remove_indices))
+        self.drifter_latitudes = np.delete(self.drifter_latitudes, remove_indices, axis=0)
+        self.drifter_longitudes = np.delete(self.drifter_longitudes, remove_indices, axis=0)
+        self.drifter_time = np.delete(self.drifter_time, remove_indices, axis=0)
+        self.N = len(self.drifter_longitudes)        
         self.nans_set = True
     
     
     def start_end_times(self):
-        self.start_times = [timedelta(seconds = self.drifter_time[i][0]) + datetime(1900, 1, 1, 0, 0) for i in range(len(self.drifter_time))]
-        self.end_times = [timedelta(seconds = self.drifter_time[i][-1]) + datetime(1900, 1, 1, 0, 0) for i in range(len(self.drifter_time))]
-        
-        
+        """
+        Compute start and end times of drifters in datetime format
+        """
+        self.start_times = [timedelta(seconds = self.drifter_time[i][0]) + self.time_0 for i in range(len(self.drifter_time))]
+        self.end_times = [timedelta(ttconds = self.drifter_time[i][-1]) + self.time_0 for i in range(len(self.drifter_time))]
+        self.trajectory_lengths = np.array([(self.end_times[i] - self.start_times[i]).days for i in range(len(self.end_times))])
+
+
+    def distance_on_sphere(self, i1, i2):
+        """
+        Function to return a vector of distances (km) for two drifters with indices i1 and i2.
+        Assumed is that the vectors are defined for the same times.
+        """
+        lats1 = self.drifter_latitudes[i1]
+        lons1 = self.drifter_longitudes[i1]
+        lats2 = self.drifter_latitudes[i2]
+        lons2 = self.drifter_longitudes[i2]
     
-    
-    def distance_on_sphere(self, i1, i2, trajectory_type):
+        r = 6371.
+        a = np.pi/180.
+        arg = np.sin(a * lats1) * np.sin(a * lats2) + np.cos(a * lats1) * np.cos(a * lats2) * np.cos(a * (lons1-lons2))
+        
+        for i in range(len(arg)):
+            if (np.abs(arg[i]) - 1.)>1e-5: arg[i]=1
+        
+        d = r * np.arccos(arg)
+            
+        return d
+        
+
+    def distance_on_sphere_time_incoherent(self, i1, i2):
         """
         Function to return a vector of distances (km) for two drifters with indices i1 and i2.
         The distances are only computed for the temporal overlap of the drifter data. If they
         do not overlap, nan is returned.
+        
         """
-
         time1, time2 = self.drifter_time[i1], self.drifter_time[i2]
         
         min_time = np.max([np.min(time1), np.min(time2)])
@@ -139,33 +210,33 @@ class trajectory_data(object):
             return d
         
     
-    def compute_M(self, min_dist):
+    def compute_M(self, distance_function='distance_on_sphere'):
         """
-        Function to compute NxN network containing the minimum distance (simultaneous time)
-        of two drifters
+        Function to compute NxN network containing the minimum distance of two drifters.
+        - distance_function: 'distance_on_sphere_time_incoherent', 'distance_on_sphere'
         """
+        
+        distance_function = getattr(self, distance_function)
         
         if not self.nans_set:
             self.set_nans()
         
         A = np.empty((self.N, self.N))
-        
+        print(A.shape)
         for i in range(self.N):
             if i%50 ==0: print(str(i) + " / " + str(self.N))
-            for j in range(i+1, self.N):
-                A[i,j] = np.nanmin(self.distance_on_sphere(i,j))
-    
-        self.M_mindist = A + A.transpose()
-        self.M = np.zeros(A.shape)
-        self.M[self.M_mindist<=min_dist] = 1
-    
-    
+            for j in range(i, self.N):
+                A[i,j] = np.nanmin(distance_function(i,j))
+                
+        self.M_mindist = A
+
+
     def set_discretizing_values(self, d_deg=0.5):
         """
         Set cell size for matrix computation
         """
+        
         self.d_deg = d_deg
-        self.domain = domain.north_atlantic_domain()
         self.n_lons  = int((self.domain.maxlon - self.domain.minlon)/d_deg)
         self.n_lats  = int((self.domain.maxlat - self.domain.minlat)/d_deg)
         self.n_horizontal   = self.n_lons * self.n_lats        
@@ -173,38 +244,68 @@ class trajectory_data(object):
         self.discretized = True 
     
     
+    def restrict_to_subset(self, indices):
+        """
+        Limit drifter data to a subset, labelled by indices
+        """
+        
+        self.drifter_longitudes = self.drifter_longitudes[indices]
+        self.drifter_latitudes = self.drifter_latitudes[indices]
+        self.drifter_time = self.drifter_time[indices]
+        self.N = len(indices)
+        
+        
+    def save_to_npz(self, filename):
+        np.savez(filename, drifter_longitudes = self.drifter_longitudes,
+                 drifter_latitudes = self.drifter_latitudes, drifter_time = self.drifter_time)
+    
+    
     def coords_to_matrixindex2D(self, coord_2D):
         """
-        Function to compute the matrix index from a given (lon, lat) coordinate
+        Function to compute the symbol for a certain binning, from a given (lon, lat) coordinate
         """
+        
         (lon, lat) = coord_2D
         if np.isnan(lon) or np.isnan(lat):
             return np.nan
         else:
             index_2D    = int((lat - self.domain.minlat)//self.d_deg * self.n_lons + (lon - self.domain.minlon)//self.d_deg)
             return index_2D
+    
 
-
-    def compute_symbolic_sequences(self, d_deg=0.5, dt_days=5):
+    def compute_symbolic_sequences(self, d_deg=1.0, dt_days=60):
         """
-        Function to compute, for each drifter, the symbolic sequence given the 
+        For transition matrix: Function to compute, for each drifter, the symbolic sequence given the 
         cell size of d_deg and time interval of dt_days. See respective section
         in the paper for more detailed explanation.
         """
         
         self.set_discretizing_values(d_deg)
         self.dt_days = dt_days
-        dt_indices = int(dt_days * 4) #as data is every 6 hours
+        dt_indices = int(dt_days / self.time_interval_days)
         
-        self.symbolic_sequence = []
-        
+        self.symbolic_sequence = []        
         for k in range(dt_indices):
             self.symbolic_sequence += [np.array([self.coords_to_matrixindex2D((lo,la)) for lo, la in 
                                       zip(self.drifter_longitudes[i][k::dt_indices],
                                           self.drifter_latitudes[i][k::dt_indices])]) for i in range(self.N)]
-        
     
-    def compute_P_and_C(self, matrix_type='killed_Markov'):
+    
+    def compute_initial_symbols(self, d_deg=1.0):
+        """
+        Only compute initial symbols and distribution for plotting
+        """
+        self.set_discretizing_values(d_deg)
+        self.initial_symbols = np.array([self.coords_to_matrixindex2D((lo[0],la[0])) for lo, la in zip(self.drifter_longitudes,
+                                                                                              self.drifter_latitudes)])
+        unique_symbols, counts = np.unique(self.initial_symbols, return_counts=True)
+        
+        d = np.zeros(self.n_horizontal)
+        d[unique_symbols] = counts
+        self.initial_distribution = d
+    
+
+    def compute_P(self, matrix_type='killed_Markov'):
         """
         Function to compute the transition matrix P, and the cell connection matrix, C.
         Note that the domain is chosen such that drifters that leave it have negative bin index,
@@ -244,8 +345,6 @@ class trajectory_data(object):
         W = W[0:self.n_horizontal,:][:,0:self.n_horizontal]
         
         D_inv = sparse.diags([1./di if di>0 else 1. for di in d])
-        # from sklearn.preprocessing import normalize
-        # P = normalize(W, norm='l1', axis=1)
         P =  (W.transpose().dot(D_inv)).transpose()
         
         if matrix_type == 'Markov':
@@ -257,33 +356,8 @@ class trajectory_data(object):
         self.W = W
         self.d = d
         self.P = P
-        self.C = P.copy()
-        self.C.data[:] = 1
-        
-        
-    def compute_T(self):
-        
-        symbolic_sequence = self.symbolic_sequence
-        rows = []
-        cols = []
-        vals = []
-        
-        for i in range(len(symbolic_sequence)):
-            if i%50 ==0: print(str(i) + " / " +str(len(symbolic_sequence)))
-            s1 = set(symbolic_sequence[i])
-            for j in range(i, len(symbolic_sequence)):
-                s2 = set(symbolic_sequence[j])
-                v = len(set.intersection(s1, s2))
-                if v>0:
-                    rows.append(i)
-                    cols.append(j)
-                    vals.append(v)
-         
-        self.C_counts = coo_matrix((vals, (rows, cols)), shape=(len(symbolic_sequence),len(symbolic_sequence))).tocsr()
-        self.C = self.C_counts.copy()
-        self.C.data[:]=1
-
-
+            
+    
     def surface_area_field(self):
         """
         Function to return the surface area (km2) of the chosen cells as a vector
@@ -296,7 +370,132 @@ class trajectory_data(object):
         return A_horizontal[0]  
 
 
-    def plot_discretized_distribution(self, v, ax, cmap = None, land = False, 
+    def scatter_initial_position(self, ax, indices=None):
+        """
+        Scatter initial positions (of a subset labelled by indices).
+        If indices is None, then take whole data set
+        """
+        m = Basemap(projection='mill',llcrnrlat=self.domain.minlat_plot, urcrnrlat=self.domain.maxlat_plot, 
+                    llcrnrlon=self.domain.minlon_plot, urcrnrlon=self.domain.maxlon_plot, resolution='c')
+        m.drawparallels(self.domain.parallels, labels=[True, False, False, True], linewidth=1., size=9, color='lightgray')
+        m.drawmeridians(self.domain.meridians, labels=[False, False, False, True], linewidth=1., size=9, color='lightgray')
+        m.drawcoastlines()
+        m.fillcontinents(color='dimgray')
+        
+        if indices == None: indices = range(len(self.drifter_longitudes))
+        
+        lon_reduced = self.drifter_longitudes[indices]
+        lat_reduced = self.drifter_latitudes[indices]
+        lonplot = [lon_reduced[i][0] for i in range(len(lon_reduced))]
+        latplot = [lat_reduced[i][0] for i in range(len(lat_reduced))]        
+        xs, ys = m(lonplot, latplot)
+        ax.scatter(xs, ys, s=2, alpha = 0.5)
+
+
+    def scatter_trajectories(self, ax, indices):
+        """
+        Scatter whole trajectories (of a subset labelled by indices).
+        If indices is None, then take whole data set
+        """
+        
+        m = Basemap(projection='mill',llcrnrlat=self.domain.minlat_plot, urcrnrlat=self.domain.maxlat_plot, 
+                    llcrnrlon=self.domain.minlon_plot, urcrnrlon=self.domain.maxlon_plot, resolution='c')
+        m.drawparallels(self.domain.parallels, labels=[True, False, False, True], linewidth=1., size=9, color='lightgray')
+        m.drawmeridians(self.domain.meridians, labels=[False, False, False, True], linewidth=1., size=9, color='lightgray')
+        m.drawcoastlines()
+        m.fillcontinents(color='dimgray')
+        
+        if indices == None: indices = range(len(self.drifter_longitudes))
+        
+        lon_reduced = self.drifter_longitudes[indices]
+        lat_reduced = self.drifter_latitudes[indices]
+        
+        lonplot = lon_reduced[0]
+        latplot = lat_reduced[0]
+        
+        for i in range(1, len(lon_reduced)):
+            lonplot = np.append(lonplot, lon_reduced[i])
+            latplot = np.append(latplot, lat_reduced[i])
+        
+        xs, ys = m(lonplot, latplot)
+        ax.scatter(xs, ys, s=2, alpha = 0.5)
+        
+
+    def trajectories_density(self, indices, nmax=None):
+        """
+        Function to return a density field defined by all points on the trajectory
+        """
+        seq = self.symbolic_sequence
+        
+        if indices == None: indices = range(len(self.drifter_longitudes))
+        
+        s = np.array(seq[indices[0]][:nmax]).astype(int)
+        
+        for i in indices[1:]:
+            s = np.append(s, seq[i][:nmax].astype(int))
+        
+        s = s[s>=0]
+        s_unique, s_counts = np.unique(s[~np.isnan(s)], return_counts=True)
+        
+        d = np.zeros(self.n_horizontal)
+        d[s_unique] = s_counts
+        
+        self.d_cluster = d
+        
+
+    def scatter_initial_position_with_labels(self, ax, labels):
+        """
+        Scatter initial positions with color map given by labels
+        """
+        lon_plot = np.array([lo[0] for lo in self.drifter_longitudes])
+        lat_plot = np.array([lo[0] for lo in self.drifter_latitudes])
+        
+        m = Basemap(projection='mill',llcrnrlat=self.domain.minlat_plot, urcrnrlat=self.domain.maxlat_plot, 
+                    llcrnrlon=self.domain.minlon_plot, urcrnrlon=self.domain.maxlon_plot, resolution='c')
+        m.drawparallels(self.domain.parallels, labels=[True, False, False, True], linewidth=1., size=9, color='lightgray')
+        m.drawmeridians(self.domain.meridians, labels=[False, False, False, True], linewidth=1., size=9, color='lightgray')
+        m.drawcoastlines()
+        m.fillcontinents(color='dimgray')
+        
+        xs, ys = m(lon_plot, lat_plot)
+        p = ax.scatter(xs, ys, s=4, c=labels)
+        plt.colorbar(p, shrink=.6, aspect=25)
+        
+
+    def scatter_trajectories_with_labels(self, ax, labels, random_sample=100, seed=None):
+        """
+        Scatter entire trajectories with color map given by labels.
+        - random_sample: size of a random subsample to accelerate plotting
+        """
+        np.random.seed(seed)
+        indices = np.random.randint(0, len(self.drifter_longitudes), size=random_sample)
+        labels = labels[indices]
+        lon_reduced = self.drifter_longitudes[indices]
+        lat_reduced = self.drifter_latitudes[indices]
+        
+        lonplot = lon_reduced[0]
+        latplot = lat_reduced[0]
+        c = np.array([labels[0]] * len(lon_reduced[0]))
+        
+        for i in range(1, len(lon_reduced)):
+            lonplot = np.append(lonplot, lon_reduced[i])
+            latplot = np.append(latplot, lat_reduced[i])
+            c = np.append(c, np.array([labels[i]] * len(lon_reduced[i])))
+        
+        m = Basemap(projection='mill',llcrnrlat=self.domain.minlat_plot, urcrnrlat=self.domain.maxlat_plot, 
+                    llcrnrlon=self.domain.minlon_plot, urcrnrlon=self.domain.maxlon_plot, resolution='c')
+        m.drawparallels(self.domain.parallels, labels=[True, False, False, True], linewidth=1., size=9, color='lightgray')
+        m.drawmeridians(self.domain.meridians, labels=[False, False, False, True], linewidth=1., size=9, color='lightgray')
+        m.drawcoastlines()
+        m.fillcontinents(color='dimgray')
+        
+        indices_plot = np.random.shuffle(np.array(range(len(lonplot))))
+        xs, ys = m(lonplot, latplot)
+        p = ax.scatter(xs[indices_plot], ys[indices_plot], s=2, c=c[indices_plot],  alpha = 0.1)
+        plt.colorbar(p, shrink=.6, aspect=25)
+        
+
+    def plot_discretized_distribution(self, v, ax, cmap = None, norm=None, land = False, 
                                       title = 'notitle', colbar=True, 
                                       cbartitle = None, logarithmic = False,
                                       cbar_orientation = 'horizontal'):
@@ -312,12 +511,12 @@ class trajectory_data(object):
         
         #plotting
         if cmap == None: cmap = 'plasma'
+        if norm == None: norm= colors.Normalize(vmin=np.ma.min(d2d), vmax=np.ma.max(d2d))
         
-        m = Basemap(projection='mill',llcrnrlat=0.,urcrnrlat=85., 
-                    llcrnrlon=-100,urcrnrlon=40,resolution='c')
-
-        m.drawparallels([20,40,60,80], labels=[True, False, False, True], linewidth=1., size=9, color='lightgray')
-        m.drawmeridians([-70,-40,-10,20,50], labels=[False, False, False, True], linewidth=1., size=9, color='lightgray')
+        m = Basemap(projection='mill',llcrnrlat=self.domain.minlat_plot, urcrnrlat=self.domain.maxlat_plot, 
+                    llcrnrlon=self.domain.minlon_plot, urcrnrlon=self.domain.maxlon_plot, resolution='c')
+        m.drawparallels(self.domain.parallels, labels=[True, False, False, True], linewidth=1., size=9, color='lightgray')
+        m.drawmeridians(self.domain.meridians, labels=[False, False, False, True], linewidth=1., size=9, color='lightgray')
         m.drawcoastlines()
 
         if land: m.fillcontinents(color='dimgray')
@@ -325,8 +524,7 @@ class trajectory_data(object):
         if logarithmic:
             p = ax.pcolormesh(xs, ys, d2d, rasterized=True, cmap =  cmap,  norm=colors.LogNorm())
         else:
-            p = ax.pcolormesh(xs, ys, d2d, rasterized=True, cmap =  cmap) # , vmin=-20, vmax=1)
-        # ax.set_title(title, size=20, y=1.01)
+            p = ax.pcolormesh(xs, ys, d2d, rasterized=True, cmap =  cmap, norm=norm)# , vmin=-20, vmax=1)
 
         if colbar: 
             if cbar_orientation == 'horizontal':
@@ -335,42 +533,42 @@ class trajectory_data(object):
                 cbar = plt.colorbar(p, shrink=.6, aspect=40)
             cbar.ax.tick_params(labelsize=9) 
             if cbartitle is not None:
-                cbar.set_label(cbartitle, size=9)
-
-        # return p
+                cbar.set_label(cbartitle, size=9)  
         
+        
+
 
 class undirected_network(object):
     
-    def __init__(self, adjacency_matrix, cluster_indices, cluster_volume, 
-                 cluster_label = '0'):
+    def __init__(self, adjacency_matrix, cluster_indices=np.array([]), cluster_volume=np.array([]), cluster_label = 0):
+        
         """
         adjacency_matrix: format sparse.csr_matrix. If it is not symmetric it is symmetrized.
         region_indices: indices corresponding to network domain.
         cluster_volume: vector of volume of the nodes inside the cluster.
         """
+        if len(cluster_indices)==0:
+            cluster_indices = np.array(range(adjacency_matrix.shape[0]))
+        if len(cluster_volume)==0:
+            cluster_volume = np.array(sparse.csr_matrix.sum(adjacency_matrix, axis=1))[:,0]
+        
         self.adjacency_matrix = adjacency_matrix
         self.cluster_indices = cluster_indices
         self.cluster_volume = cluster_volume
-        self.N = len(cluster_indices)
+        self.N = adjacency_matrix.shape[0]
         self.cluster_label = cluster_label
         self.rho = np.sum(self.adjacency_matrix)/np.sum(self.cluster_volume)
         assert(len(cluster_indices) == self.adjacency_matrix.shape[0])
         assert(len(cluster_volume) == len(cluster_indices))
         print('Construct undirected network.')
     
+    
     def __del__(self):
-        print('Adjacency matrix deleted')
+        print('Adjacency matrix object deleted')
 
-    @classmethod
-    def from_sparse_npz(cls, filename):
-        """
-        Load from sparse matrix
-        """
-        A = scipy.sparse.load_npz(filename)
-        return cls(A)
-
+      
     def connected_components(self):
+
         """
         Determine connected components
         """
@@ -380,7 +578,6 @@ class undirected_network(object):
         component_lengths = np.array([len(s) for s in components])
         component_inds = np.argsort(component_lengths)[::-1]
         components_sorted = components[component_inds]
-        
         component_lengths = np.array([len(c) for c in components_sorted])
         
         print('Component lengths (>1):')
@@ -389,14 +586,15 @@ class undirected_network(object):
         n = int(input('Please specify how many components you want to keep: '))
         components_sorted = components_sorted[:n]
         
+        
         sub_networks = []
         
-        for c in components_sorted:
-            inds = list(c)
+        for i in range(len(components_sorted)):
+            inds = list(components_sorted[i])
             sub_adjacency_matrix = self.adjacency_matrix[inds, :][:, inds]
             sub_cluster_indices = self.cluster_indices[inds]
             sub_cluster_volume = self.cluster_volume[inds]
-            sub_cluster_label = self.cluster_label + '_'
+            sub_cluster_label = self.cluster_label
             sub_networks.append(undirected_network(sub_adjacency_matrix, sub_cluster_indices, 
                                                    sub_cluster_volume, sub_cluster_label))
         
@@ -407,36 +605,165 @@ class undirected_network(object):
         d = np.array(sparse.csr_matrix.sum(self.adjacency_matrix, axis=1))[:,0]
         D_sqrt_inv = scipy.sparse.diags(1./np.sqrt(d))
         L = sparse.identity(self.N) - (D_sqrt_inv.dot(self.adjacency_matrix)).dot(D_sqrt_inv)
-        print('Computing spectrum')
+        print('Computing spectrum of symmetric normalized Laplacian')
         w, v = sparse.linalg.eigsh(L, k=K, which = 'SM')
         inds = np.argsort(w)
         w = w[inds]
         v = v[:,inds]
-        self.eigenvalues = w
-        self.eigenvectors = D_sqrt_inv.dot(v)
-
-
-    def ncut_split(self, indices_1, indices_2):
-        a1 = np.sum(self.adjacency_matrix[indices_1, :][: ,indices_2])
-        a2 = np.sum(self.adjacency_matrix[indices_2, :][: ,indices_1])
         
-        s1 = np.sum(self.adjacency_matrix[indices_1,:])
-        s2 = np.sum(self.adjacency_matrix[indices_2,:])
+        plt.plot(w, 'o')
+        plt.title('Eigenvalues of symmetric normalized Laplacian')
+        plt.grid(True)
+        plt.show()
         
-        return a1/s1 + a2/s2
+        self.Lsym_eigenvalues = w
+        self.Lsym_eigenvectors = D_sqrt_inv.dot(v)
 
+
+    def compute_unnormalized_laplacian_spectrum(self, K=20):
+        d = np.array(sparse.csr_matrix.sum(self.adjacency_matrix, axis=1))[:,0]
+        D = scipy.sparse.diags(d)
+        L = D - self.adjacency_matrix
+        print('Computing spectrum of symmetric normalized Laplacian')
+        w, v = sparse.linalg.eigsh(L, k=K, which = 'SM')
+        inds = np.argsort(w)
+        w = w[inds]
+        v = v[:,inds]
+        
+        plt.plot(w, 'o')
+        plt.title('Eigenvalues of symmetric normalized Laplacian')
+        plt.grid(True)
+        plt.show()
+        
+        self.L_eigenvalues = w
+        self.L_eigenvectors = v
+
+    
+    def cluster_kmeans(self, K, rs=0, method = 'ncut'):
+        if method == 'ncut':
+            X = self.Lsym_eigenvectors[:,:K]        
+        elif method == 'cut':
+            X = self.L_eigenvectors[:,:K]            
+        kmeans = KMeans(n_clusters=K, random_state=rs).fit(X)        
+        self.kmeans_labels = kmeans.labels_
+
+
+    # def cluster_directional_cosine(self, K, rs=0): #maybe remove
+    #     X = np.array(self.Lsym_eigenvectors[:,:K])
+    #     X_normalized = np.array([X[i] / np.sqrt(X[i].dot(X[i])) for i in range(len(X))])
+        
+    #     Z = X_normalized.dot(X_normalized.transpose())
+    #     kmeans = KMeans(n_clusters=K, random_state=rs).fit(Z)        
+    #     self.directional_cosine_labels = kmeans.labels_
+        
 
     def drho_split(self, indices_1, indices_2):
+        """
+        If we propose to split a cluster, this returns the changes in the coherence ratio for a split into
+        indices_1 and indices_2
+        """
         cluster_volume_1 = np.sum(self.cluster_volume[indices_1])
         cluster_volume_2 = np.sum(self.cluster_volume[indices_2])
-        
         stays_in_1 = np.sum(self.adjacency_matrix[indices_1, :][: ,indices_1])
-        stays_in_2 = np.sum(self.adjacency_matrix[indices_2, :][: ,indices_2])
-        
+        stays_in_2 = np.sum(self.adjacency_matrix[indices_2, :][: ,indices_2])        
         return stays_in_1 / cluster_volume_1 + stays_in_2 / cluster_volume_2 - self.rho
 
 
-    def split_according_to_vn(self, optimize = False, n=2):
+    def hierarchical_clustering_ShiMalik(self, K):
+        networks = {}
+        networks[0] = [self]
+
+        for i in range(1,K):
+            
+            optimal_drhos = []
+            optimal_cutoffs = []
+            
+            for nw in networks[i-1]:
+                if nw.N<100: 
+                    optimal_drhos.append(np.nan)
+                    optimal_cutoffs.append(np.nan)
+                    continue
+        
+                nw.compute_laplacian_spectrum()
+                V_fiedler = nw.Lsym_eigenvectors[:,1]
+                c_range = np.linspace(np.min(V_fiedler), np.max(V_fiedler), 100)[1:]
+                
+                drhos = []
+                for c in c_range:
+                
+                    indices_1 = np.argwhere(V_fiedler<=c)[:,0]
+                    indices_2 = np.argwhere(V_fiedler>c)[:,0]
+                    drhos.append(nw.drho_split(indices_1, indices_2))
+                    
+                drhos = np.array(drhos)
+                plt.plot(c_range, drhos)
+                plt.yscale('log')
+                plt.grid(True)
+                plt.title(r'$\Delta \rho_{global}$ for different cutoffs')
+                plt.show()
+                cutoff_opt = c_range[np.nanargmax(drhos)]
+                print('Choosing as cutoff: ', str(cutoff_opt))
+                
+                optimal_drhos.append(np.nanmax(drhos))
+                optimal_cutoffs.append(cutoff_opt)
+            
+            i_cluster = np.nanargmax(optimal_drhos)
+            print('Splitting cluster ', i_cluster+1)
+            cutoff_cluster = optimal_cutoffs[np.nanargmax(optimal_drhos)]
+            nw_to_split = networks[i-1][i_cluster]
+            V_fiedler = nw_to_split.Lsym_eigenvectors[:,1]
+            indices_1 = np.argwhere(V_fiedler<=cutoff_cluster)[:,0]
+            indices_2 = np.argwhere(V_fiedler>cutoff_cluster)[:,0]
+            
+            if len(indices_1)<len(indices_2):
+                ind_ = indices_1.copy()
+                indices_1= indices_2.copy()
+                indices_2 = ind_
+            
+            adjacency_matrix_1 = nw_to_split.adjacency_matrix[indices_1, :][:, indices_1]
+            adjacency_matrix_2 = nw_to_split.adjacency_matrix[indices_2, :][:, indices_2]
+            cluster_indices_1 = nw_to_split.cluster_indices[indices_1]
+            cluster_indices_2 = nw_to_split.cluster_indices[indices_2]
+            cluster_volume_1 = nw_to_split.cluster_volume[indices_1]
+            cluster_volume_2 = nw_to_split.cluster_volume[indices_2]
+            
+            
+            cluster_label_1 = nw_to_split.cluster_label
+            
+            old_labels = [nw.cluster_label for nw in networks[i-1]]
+            
+            cluster_label_2 = np.max(old_labels)+1
+            
+            network_children = [undirected_network(adjacency_matrix_1, cluster_indices_1, cluster_volume_1, cluster_label_1), 
+                            undirected_network(adjacency_matrix_2, cluster_indices_2, cluster_volume_2, cluster_label_2)]
+            
+            networks[i] = networks[i-1].copy()
+            networks[i].pop(i_cluster)
+            networks[i] += network_children #append in the back
+        
+        self.clustered_networks = networks
+
+
+    def hierarchical_clustering_individual_rhos(self, rho_cutoff=0.99):
+        networks = {}
+        networks[0] = [self]
+        
+        for i in range(1,20):
+            networks[i] = []
+            for nw in networks[i-1]:
+                if nw.rho>rho_cutoff and nw.N>100:
+                    networks[i] += nw.split_according_to_v2(optimize = True)
+                else:
+                    networks[i] += [nw]
+            
+            if len(networks[i-1]) == len(networks[i]):
+                print('No more splits executed')
+                break;
+        
+        self.networks = networks
+
+
+    def split_according_to_v2(self, optimize = False, promt=False):
         
         d = np.array(sparse.csr_matrix.sum(self.adjacency_matrix, axis=1))[:,0]
         D_sqrt_inv = scipy.sparse.diags(1./np.sqrt(d))
@@ -454,7 +781,7 @@ class undirected_network(object):
         plt.title('Spectrum')
         plt.show()
         
-        V_fiedler = v[:,n-1] #This transforms the eigenvectors
+        V_fiedler = v[:,1] #This transforms the eigenvectors
         
         plt.hist(V_fiedler, bins=50)
         plt.title('Histogram of splitting vector')
@@ -473,14 +800,16 @@ class undirected_network(object):
             ncuts = np.array(ncuts)
             plt.plot(c_range, ncuts)
             plt.yscale('log')
-            plt.hlines(w[n-1], np.min(ncuts), np.max(ncuts), colors = 'r', linestyles = '--')
             plt.grid(True)
             plt.title('Ncuts for different cutoffs')
             plt.show()
             cutoff_opt = c_range[np.nanargmin(ncuts)]
             print('Choosing as cutoff: ', str(cutoff_opt))
             
-            choice = input('Do you agree with this cutoff? (y/n)')
+            if promt:
+                choice = input('Do you agree with this cutoff? (y/n)')
+            else:
+                choice = 'y'
             
             if choice!='y':
                 cutoff_opt = float(input('Please specify the cutoff you want.'))
@@ -513,93 +842,3 @@ class undirected_network(object):
             sub_clusters = sub_clusters[::-1]
             
         return sub_clusters
-
-        
-        
-        
-        
-        
-        
-
-
-
-
-
-
-
-
-
-
-def construct_count_matrix_drifters():
-    data = np.load('trajectory_data_north_atlantic/drifterdata_north_atlantic.npz', allow_pickle=True)
-    lon = data['lon']
-    lat = data['lat']
-    time = data['time']
-    ID = data['ID']
-    
-    description = "first test"
-    drifter_data = trajectory_data(drifter_longitudes = lon, drifter_latitudes = lat, 
-                                   drifter_time = time, drifter_id = ID, 
-                                   data_description = description)
-    
-    drifter_data.construct_mindist_network(trajectory_type = 'time_incoherent', 
-                                           output_name = 'first_try')
-
-
-def symbolic_paths_matrix():
-    data = np.load('trajectory_data_north_atlantic/drifterdata_north_atlantic.npz', allow_pickle=True)
-    lon = data['lon']
-    lat = data['lat']
-    time = data['time']
-    ID = data['ID']
-    
-    description = "trajectory based network, not time info"
-    drifter_data = trajectory_data(drifter_longitudes = lon, drifter_latitudes = lat, 
-                                    drifter_time = time, drifter_id = ID, 
-                                    data_description = description)
-    drifter_data.compute_symbolic_sequences(d_deg = 0.1, dt_days = 0.25)
-    
-    sequence = drifter_data.symbolic_sequence
-    
-    rows = []
-    cols = []
-    vals = []
-    
-    for i in range(len(sequence)):
-        if i%50 ==0: print(str(i) + " / " +str(len(sequence)))
-        s1 = set(sequence[i])
-        for j in range(i, len(sequence)):
-            s2 = set(sequence[j])
-            v = len(set.intersection(s1, s2))
-            if v>0:
-                rows.append(i)
-                cols.append(j)
-                vals.append(v)
-     
-    W = coo_matrix((vals, (rows, cols)), shape=(len(sequence),len(sequence))).tocsr()
-    sparse.save_npz('trajectory_network', W)
- 
-
-def compute_drifter_transitionmatrix():
-                    
-    data = np.load('drifter_data_north_atlantic/drifterdata_north_atlantic.npz', allow_pickle=True)
-    lon = data['lon']
-    lat = data['lat']
-    time = data['time']
-    ID = data['ID']
-    
-    dt_days=60
-    d_deg = 1.0
-    print('dt_days: ', dt_days)
-    
-    drifter_data = trajectory_data(drifter_longitudes = lon, drifter_latitudes = lat, 
-                                    drifter_time = time, drifter_id = ID)
-    drifter_data.compute_symbolic_sequences(d_deg = d_deg, dt_days = dt_days)
-    
-    print("computing transition matrix")
-    drifter_data.compute_P_and_C(matrix_type = 'Markov')
-    sparse.save_npz('analysis_output/transition_matrix_markov_ddeg1_ddays_60', drifter_data.P)
-    np.save('analysis_output/initial_distribution_markov_ddeg1', drifter_data.d)
-    # sparse.save_npz('analysis_output/count_matrix_markov_ddeg05_ddays', drifter_data.W)
-
-# compute_drifter_transitionmatrix()
