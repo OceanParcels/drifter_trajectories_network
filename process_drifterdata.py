@@ -37,8 +37,6 @@ def constrain_to_north_atlantic():
     TIME = np.array([(datetime(int(year[i]), int(month[i]), int(day[i]), int(hour[i]))-datetime(1900, 1, 1, 0, 0)).total_seconds() for i in range(len(month))])
     LAT = d[:,4]
     LON = d[:,5]
-    SST = d[:,6]
-    V = d[:,9]
     print('First file loaded')
     
     for df in datafiles[1:]:
@@ -53,9 +51,7 @@ def constrain_to_north_atlantic():
         TIME = np.append(TIME, time)
         LAT = np.append(LAT, d[:,4])
         LON = np.append(LON, d[:,5])
-        SST = np.append(SST, d[:,6])
-        V = np.append(V, d[:,9])
-    
+        
     LON[LON>180.]-=360.
     
     
@@ -139,14 +135,12 @@ def constrain_to_north_atlantic():
     lons_north_atlantic = [LON[ID == i] for i in unique_ids_north_atlantic]
     lats_north_atlantic = [LAT[ID == i] for i in unique_ids_north_atlantic]
     time_north_atlantic = [TIME[ID == i] for i in unique_ids_north_atlantic]
-    SST_north_atlantic = [SST[ID == i] for i in unique_ids_north_atlantic]
-    V_north_atlantic = [V[ID == i] for i in unique_ids_north_atlantic]
     
     assert(len(time_north_atlantic)==len(lons_north_atlantic))
     assert(len(lats_north_atlantic)==len(lons_north_atlantic))
-    np.savez('drifter_data_north_atlantic/drifterdata_north_atlantic', lon = lons_north_atlantic, lat = lats_north_atlantic, 
-              time = time_north_atlantic, ID = unique_ids_north_atlantic, SST = SST_north_atlantic,
-              V = V_north_atlantic)
+    np.savez('drifter_data_north_atlantic/drifterdata_north_atlantic', drifter_longitudes = lons_north_atlantic, 
+             drifter_latitudes = lats_north_atlantic, drifter_time = time_north_atlantic,
+             ID = unique_ids_north_atlantic)
      
 
 def check_data():
@@ -154,9 +148,9 @@ def check_data():
     Check if saved data is correct
     """
     data = np.load('drifter_data_north_atlantic/drifterdata_north_atlantic.npz', allow_pickle=True)
-    lon = data['lon']
-    lat = data['lat']
-    time = data['time']
+    lon = data['drifter_longitudes']
+    lat = data['drifter_latitudes']
+    time = data['drifter_time']
     
     t0 = [timedelta(seconds = time[0][i]) + datetime(1900, 1, 1, 0, 0) for i in range(len(time[0]))]
     print(t0)
@@ -183,9 +177,9 @@ def create_coherent_monthly_drifter_data():
     """
     
     data = np.load('drifter_data_north_atlantic/drifterdata_north_atlantic.npz', allow_pickle=True)
-    lon = data['lon']
-    lat = data['lat']
-    time = data['time']
+    lon = data['drifter_longitudes']
+    lat = data['drifter_latitudes']
+    time = data['drifter_time']
     time_full = [np.array([timedelta(seconds = time[i][j]) + datetime(1900, 1, 1, 0, 0) 
                            for j in range(len(time[i]))]) for i in range(len(time))]
     
@@ -219,14 +213,14 @@ def create_month_aggregated_coherent_drifter_data():
     """
     
     data = np.load('drifter_data_north_atlantic/drifterdata_north_atlantic.npz', allow_pickle=True)
-    lon = data['lon']
-    lat = data['lat']
-    time = data['time']
+    lon = data['drifter_longitudes']
+    lat = data['drifter_latitudes']
+    time = data['drifter_time']
     time_full = [np.array([timedelta(seconds = time[i][j]) + datetime(1900, 1, 1, 0, 0) 
                            for j in range(len(time[i]))]) for i in range(len(time))]
     
     # for trajectory_lenght_days in [60,120,180,360]:    
-    trajectory_lenght_days = 365
+    trajectory_lenght_days = 490
     lons = []
     lats = []
     t = []
@@ -259,7 +253,7 @@ def create_uniformized_dataset(d_deg=1.):
     """
     
     #Load data, but only daily positions, and plot
-    drifter_data = trajectory_data.from_npz('drifter_data_north_atlantic/time_coherent_drifters_combined_length_days_365.npz',
+    drifter_data = trajectory_data.from_npz('drifter_data_north_atlantic/time_coherent_drifters_combined_length_days_490.npz',
                                             n_step=4)
     print('Size before: ', drifter_data.N)
     f, ax = plt.subplots(figsize=(10,10))
@@ -288,5 +282,4 @@ def create_uniformized_dataset(d_deg=1.):
     drifter_data.plot_discretized_distribution(drifter_data.initial_distribution, ax,
                                                logarithmic = False)
     
-    drifter_data.save_to_npz('drifter_data_north_atlantic/uniformized_dataset_365days_1deg_uniform')
-
+    drifter_data.save_to_npz('drifter_data_north_atlantic/uniformized_dataset_490days_1deg')

@@ -1,6 +1,5 @@
-# -*- coding: utf-8 -*-
 """
-Analysis with chance pair network:
+Analysis with mean distance network:
     1. Construct matrix with M_ij = min(distances(i,j))
     2. Plot minimum distances
     3. Cluster with d_min as cutoff
@@ -11,33 +10,32 @@ import matplotlib.pyplot as plt
 from scipy import sparse
 from create_network import trajectory_data, undirected_network
 
-
 drifter_trajectory_data = 'drifter_data_north_atlantic/uniformized_dataset_120days_1deg.npz'
-matrix_file = "analysis_output/M_minimum_distances_uniformized_dataset_120days_1deg.npy"
+matrix_file = "analysis_output/T_average_distances_uniformized_dataset_120days_1deg.npy"
 d_min = 10 #cutoff, in km
-
-
-def construct_M():
-    drifter_data = trajectory_data.from_npz(drifter_trajectory_data, time_interval_days = 1)
     
-    f = plt.figure(constrained_layout=True, figsize = (10,5))
-    gs = f.add_gridspec(1, 1)
-    ax1 = f.add_subplot(gs[0,0])
-    indices = range(len(drifter_data.drifter_longitudes))
-    drifter_data.scatter_initial_position(ax1, indices)
-    plt.show()
     
-    drifter_data.compute_M()
-    np.save(matrix_file, drifter_data.M_mindist)
+def construct_T():
+drifter_data = trajectory_data.from_npz(drifter_trajectory_data, time_interval_days = 1)
 
-construct_M()
+f = plt.figure(constrained_layout=True, figsize = (10,5))
+gs = f.add_gridspec(1, 1)
+ax1 = f.add_subplot(gs[0,0])
+indices = range(len(drifter_data.drifter_longitudes))
+drifter_data.scatter_initial_position(ax1, indices)
+plt.show()
+
+drifter_data.compute_T()
+np.save(matrix_file, drifter_data.T_mean_distances)
+
+# construct_T()
 
 
-def plot_minimum_distances():   
-    M_mindist = np.load(matrix_file)
-    distances = M_mindist.flatten()
+def plot_mean_distances():   
+    T = np.load(matrix_file)
+    distances = T.flatten()
     distances = distances[~np.isnan(distances)]
-    distances = distances[distances!=0]
+    distances = distances[distances != 0]
     
     f = plt.figure(constrained_layout=True, figsize = (8,3.5))
     gs = f.add_gridspec(1, 2)
@@ -64,9 +62,11 @@ def plot_minimum_distances():
     f.savefig('./figures/minimum_distances', dpi=300)
 
 
-def cluster_chancepair_network():
-    M_mindist = np.load(matrix_file)
-    M_mindist_symmetric = M_mindist + M_mindist.transpose()
+def cluster_meandistance_network():
+    T = np.load(matrix_file)
+    T = T + T.transpose()
+    T = 1./T
+    
     
     M = np.zeros(M_mindist.shape)
     M[M_mindist_symmetric<d_min]=1

@@ -100,22 +100,29 @@ class trajectory_data(object):
     
     
     @classmethod
-    def from_npz(cls, filename, time_interval_days=None, n_step=1):
+    def from_npz(cls, filename, set_nans = True, time_interval_days=None, n_step=1):
         """
         Load data from .npz file:
             - filename has to contain: drifter_longitudes, drifter_latitudes, drifter_time
-            - time_interval_days: the days between different data points of the loaded data
+            - time_interval_days: the days between different data points of the
             - n_step: can restrict to every n_step'th data point. E.g. if data is 
             6-hourly (time_interval_days=0.25) and n_step=4, then trajectory_data object will be daily
         """
         
-        if time_interval_days==None: time_interval_days = n_step * 0.25
+        if time_interval_days==None: 
+            time_interval_days = 0.25
+        
         data = np.load(filename, allow_pickle = True)
-        lon = data['drifter_longitudes'][:,::n_step]
-        lat = data['drifter_latitudes'][:,::n_step]
-        time = data['drifter_time'][:,::n_step]
+        lon = data['drifter_longitudes']
+        lat = data['drifter_latitudes']
+        time = data['drifter_time']
+        
+        lon = [lo[::n_step] for lo in lon]
+        lat = [la[::n_step] for la in lat]
+        time = [t[::n_step] for t in time]
+        
         return cls(drifter_longitudes = lon, drifter_latitudes=lat, drifter_time = time,
-                   time_interval_days=time_interval_days)
+                   time_interval_days=time_interval_days*n_step, set_nans = set_nans)
         
     
     def set_nans(self, N_nans=0):
@@ -148,7 +155,7 @@ class trajectory_data(object):
         Compute start and end times of drifters in datetime format
         """
         self.start_times = [timedelta(seconds = self.drifter_time[i][0]) + self.time_0 for i in range(len(self.drifter_time))]
-        self.end_times = [timedelta(ttconds = self.drifter_time[i][-1]) + self.time_0 for i in range(len(self.drifter_time))]
+        self.end_times = [timedelta(seconds = self.drifter_time[i][-1]) + self.time_0 for i in range(len(self.drifter_time))]
         self.trajectory_lengths = np.array([(self.end_times[i] - self.start_times[i]).days for i in range(len(self.end_times))])
 
 
@@ -229,6 +236,28 @@ class trajectory_data(object):
                 A[i,j] = np.nanmin(distance_function(i,j))
                 
         self.M_mindist = A
+
+
+    def compute_T(self, distance_function='distance_on_sphere'):
+        """
+        Function to compute NxN network containing the minimum distance of two drifters.
+        - distance_function: 'distance_on_sphere_time_incoherent', 'distance_on_sphere'
+        """
+        
+        distance_function = getattr(self, distance_function)
+        
+        if not self.nans_set:
+            self.set_nans()
+        
+        A = np.empty((self.N, self.N))
+        print(A.shape)
+        for i in range(self.N):
+            if i%50 ==0: print(str(i) + " / " + str(self.N))
+            for j in range(i, self.N):
+                A[i,j] = np.nanmean(distance_function(i,j))
+                
+        self.T_mean_distances = A
+
 
 
     def set_discretizing_values(self, d_deg=0.5):
