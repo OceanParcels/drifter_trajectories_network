@@ -203,8 +203,10 @@ def create_coherent_monthly_drifter_data():
                         t += [time_full[i][i0 + trajectory_lenghts_n * k :i0+ + trajectory_lenghts_n * (k+1) ]]
     
             np.savez('drifter_data_north_atlantic/time_coherent_drifters_month_start' + str(month_start) 
-                     + 'length_days_' + str(trajectory_lenght_days), lon = lons, lat = lats, time=t)
+                     + 'length_days_' + str(trajectory_lenght_days), drifter_longitudes = lons, drifter_latitudes = lats, 
+                     drifter_time=t)
 
+create_coherent_monthly_drifter_data()
 
 def create_month_aggregated_coherent_drifter_data():
     
