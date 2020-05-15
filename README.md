@@ -21,3 +21,6 @@ Execute 'drifter_data_info.py'
 Execute 'clustering_north_atlantic_drifters.py' with the option plot_365days =True (figs 6,7 ) and False (fig. C1)
 
 ## Double-gyre flow
+1. Create trajectories with 'create_autonomous_doble_gyre_trajectories.py' and 'create_non_autonomous_doble_gyre_trajectories'
+2. Execute 'clustering_double_gyre.py', uncommenting the respective options for figs. 3, 4 and 5
+3. Execute 'sensitivity_double_gyre_incomplete_data.py' for fig. B3 to see the number of incorrectly assigned labels in the incomplete data case
