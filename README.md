@@ -1,1 +1,1 @@
-# Code analyse trajectories of drifters or virtual particles in the North Atlantic using trajectory based networks and network theory
+# Code for "Detecting flow features in scarce trajectory data using networks derived from symbolic itineraries: an application to surface drifters in the North Atlantic"
