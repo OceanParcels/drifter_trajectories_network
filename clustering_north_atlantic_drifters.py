@@ -1,4 +1,14 @@
 """
+Detecting flow features in scarce trajectory data using networks derived from 
+symbolic itineraries: an application to surface drifters in the North Atlantic
+------------------------------------------------------------------------------
+David Wichmann, Christian Kehl, Henk A. Dijkstra, Erik van Sebille
+
+Questions to: d.wichmann@uu.nl
+
+"""
+
+"""
 Script for clustering of Noarth Atlantic drifter data set in particle and bin space
 """
 
@@ -11,10 +21,10 @@ import matplotlib.colors
 
 """
 2 options: 
-    1. tmax = 365 days for initial time, final time and dendogram. Spectrum.
-    2. tmax = inf initial time. 
+    1. tmax = 365 days for initial time, final time and dendogram. Spectrum. (fugures 6 and 7)
+    2. tmax = inf initial time.  (fig. C1)
 """
-plot_365days=True #True for option 1
+plot_365days=False #True for option 1
 
 if plot_365days:
     colors = np.array(['midnightblue', 'dimgray', 'dimgray', 'dimgray', 'sienna', 'skyblue', 'dimgray',
@@ -24,12 +34,15 @@ if plot_365days:
     L=20 #Level of hierarchical clustering
     d_deg=[1.0]
     max_length = 365
-    t_plot = 0
     plot_paper = True
     plot_labels = True
     plot_spectrum = True
 
 else:
+    #colors are adjusted so that they match the plot_365days=True case
+    colors = np.array(['midnightblue', 'dimgray', 'dimgray', 'sienna', 'dimgray', 'skyblue', 'dimgray',
+                        'dimgray', 'dimgray', 'aqua', 'firebrick', 'dodgerblue', 'coral', 
+                        'dimgray', 'dimgray', 'dimgray', 'teal','dimgray','dimgray','dimgray'])
     K = 20 #number of eigenvectors to be computed
     L=16 #Number of clusters in hierarchical clustering. This is chosen such that the max NCut is similar to option 1 (around 3.6)
     d_deg=[1.0]
@@ -38,19 +51,14 @@ else:
     plot_dendrogram = False
     plot_spectrum = False
     plot_labels=False
-    colors = np.array(['midnightblue', 'dimgray', 'dimgray', 'sienna', 'dimgray', 'skyblue', 'dimgray',
-                        'dimgray', 'dimgray', 'aqua', 'firebrick', 'dodgerblue', 'coral', 
-                        'dimgray', 'dimgray', 'dimgray', 'teal','dimgray','dimgray','dimgray'])
-
-
-figname  = './figures/north_atlantic/north_atlantic_ddeg1_maxlen_' + str(max_length) + 't_' + str(t_plot)
+    
 #Load daily data
-drifter_data = trajectory_data.from_npz('drifter_data_north_atlantic/drifterdata_north_atlantic.npz',
+drifter_data = trajectory_data.from_npz('drifterdata_north_atlantic.npz',
                                           time_interval=0.25, n_step = 4, domain_type = "north_atlantic_domain")
 
 if max_length is not None: drifter_data.set_max_length(max_length = max_length)
 
-drifter_data.compute_symbolic_sequences(bin_size = d_deg, dt = 1)
+drifter_data.compute_symbolic_itineraries(bin_size = d_deg, dt = 1)
 trajectory_lenghts = [len(s) for s in drifter_data.symbolic_sequence]
 T = np.max(trajectory_lenghts)
 
@@ -97,8 +105,7 @@ if plot_365days:
     for k in range(L): field_plot[networks[L-1][k].cluster_indices]= networks[L-1][k].cluster_label
     field_plot = np.ma.masked_array(field_plot, field_plot==-10000)   
     drifter_data.scatter_position_with_labels_geo(ax, field_plot, cmap=cmap, norm=norm,
-                                                      cbar=False, cbarticks = list(range(K)), size=10,
-                                                      random_shuffle=True, t=0)
+                                                      cbar=False, size=10, t=0)
 
     t = plt.annotate('A', (0.25,0.2), xycoords='axes fraction', size=18, color='midnightblue')
     t.set_bbox(dict(facecolor='w', alpha=0.7))
@@ -136,10 +143,9 @@ if plot_365days:
     ax = f.add_subplot(gs[0, 2:4])
     ax.set_title('(b) particle labels at final time')
     drifter_data.scatter_position_with_labels_geo(ax, field_plot, cmap=cmap, norm=norm,
-                                                      cbar=False, cbarticks = list(range(K)), size=10,
-                                                      random_shuffle=True, t=-1)
+                                                      cbar=False, size=10, t=-1)
     
-    f.savefig('./figures/north_atlantic/na_clusters_tmax365', dpi=300)
+    f.savefig('./figures/na_clusters_tmax365', dpi=300)
     
     #Plot spectrum with lines corresponding to known regions
     labels = np.array(labels)
@@ -162,15 +168,14 @@ if plot_365days:
     ax.set_ylabel(r'$\lambda$')
     ax.set_title(r'Spectrum of $L_s$', size=14) 
     
-    f.savefig('./figures/north_atlantic/na_clusters_tmax365_spectrum', dpi=300, bbox_inches='tight')
+    f.savefig('./figures/na_clusters_tmax365_spectrum', dpi=300, bbox_inches='tight')
     
 else:
     f = plt.figure(constrained_layout=True, figsize = (5,4))
     gs = f.add_gridspec(1, 1)
     
     ax = f.add_subplot(gs[0, 0])
-    if t_plot==0: ax.set_title('Particle labels at initial time')
-    if t_plot==-1: ax.set_title('Particle labels at final time')
+    ax.set_title('Particle labels at initial time')
     
     bounds = np.arange(-0.5,L+0.5,1)
     norm = matplotlib.colors.BoundaryNorm(bounds, len(bounds))
@@ -179,6 +184,5 @@ else:
     for k in range(L): field_plot[networks[L-1][k].cluster_indices]= networks[L-1][k].cluster_label
     field_plot = np.ma.masked_array(field_plot, field_plot==-10000)   
     drifter_data.scatter_position_with_labels_geo(ax, field_plot, cmap=cmap, norm=norm,
-                                                      cbar=False, cbarticks = list(range(K)), size=10,
-                                                      random_shuffle=False, t=t_plot)
-    f.savefig('./figures/north_atlantic/na_clusters_tmaxinf', dpi=300)
+                                                      cbar=False, size=10, t=0)
+    f.savefig('./figures/na_clusters_tmaxinf', dpi=300)

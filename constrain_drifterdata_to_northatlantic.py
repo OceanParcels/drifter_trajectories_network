@@ -1,7 +1,17 @@
 """
-Script to process the 6 hourly drifter data:
-    1. Limit drifters to those starting in North Atlantic
-    2. Creates data set of similar trajectory lengths and uniform initial conditions
+Detecting flow features in scarce trajectory data using networks derived from 
+symbolic itineraries: an application to surface drifters in the North Atlantic
+------------------------------------------------------------------------------
+David Wichmann, Christian Kehl, Henk A. Dijkstra, Erik van Sebille
+
+Questions to: d.wichmann@uu.nl
+
+"""
+
+"""
+Script to process the 6 hourly drifter data and limit drifters to those starting in North Atlantic
+
+Firs download full data set from https://www.aoml.noaa.gov/phod/gdp/interpolated/data/all.php
 """
 
 import matplotlib.pyplot as plt
@@ -16,7 +26,7 @@ Create file with only those drifters that start in the North Atlantic
 """        
 
 """
-Load data
+Load data. If you download the data, the last file might have another time.     
 """
 
 data_directory = '../drifter_data/drifters_6h_200318/'
@@ -137,6 +147,6 @@ time_north_atlantic = [TIME[ID == i] for i in unique_ids_north_atlantic]
 
 assert(len(time_north_atlantic)==len(lons_north_atlantic))
 assert(len(lats_north_atlantic)==len(lons_north_atlantic))
-np.savez('drifter_data_north_atlantic/drifterdata_north_atlantic', drifter_longitudes = lons_north_atlantic, 
+np.savez('drifterdata_north_atlantic', drifter_longitudes = lons_north_atlantic, 
           drifter_latitudes = lats_north_atlantic, drifter_time = time_north_atlantic,
           ID = unique_ids_north_atlantic)

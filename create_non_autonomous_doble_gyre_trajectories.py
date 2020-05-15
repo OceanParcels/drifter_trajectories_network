@@ -1,5 +1,15 @@
 """
-Script to compute trajectories for the double gyre flow
+Detecting flow features in scarce trajectory data using networks derived from 
+symbolic itineraries: an application to surface drifters in the North Atlantic
+------------------------------------------------------------------------------
+David Wichmann, Christian Kehl, Henk A. Dijkstra, Erik van Sebille
+
+Questions to: d.wichmann@uu.nl
+
+"""
+
+"""
+Script to compute trajectories for the non-autonomous double-gyre flow
 """
 
 import numpy as np

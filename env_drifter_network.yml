@@ -1,0 +1,17 @@
+name: py3_3d_transition_matrix
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python
+  - ffmpeg
+  - git
+  - jupyter
+  - matplotlib
+  - netcdf4
+  - numpy
+  - scipy
+  - spyder
+  - basemap
+  - scikit-learn
+  - networkx

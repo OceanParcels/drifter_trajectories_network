@@ -1,8 +1,22 @@
 """
-Classes to process drifter data:
-    - Class domain: specify the region of interest (here North Atlantic).
-    - Class trajectory data: handle lon/lat/time drifter data and construct networks from them
+Detecting flow features in scarce trajectory data using networks derived from 
+symbolic itineraries: an application to surface drifters in the North Atlantic
+------------------------------------------------------------------------------
+David Wichmann, Christian Kehl, Henk A. Dijkstra, Erik van Sebille
+
+Questions to: d.wichmann@uu.nl
+
+"""
+
+"""
+Main script to handle trajectory data and network analysis.
+
+Classes:
+    - Class domain: contains the region of interest used to generate the partition and the 
+    region for plotting
+    - Class trajectory_data: handle lon/lat/time drifter data and construct networks from them
     - Class undirected_network: network analysis, mostly spectral clustering, of an undirected network
+    - Function construct_dendrogram: constructs a dendogram from a list of 'undirected_network' objects
     - Class bipartite_network: handles spectral clustering of bipartite networks
 Notes:
     - Naming of x and y coordinates is geographic (lon, lat), as the code was originally set up for geo applications
@@ -28,6 +42,8 @@ class domain(object):
     def __init__(self, minlon, maxlon, minlat, maxlat,
                  minlon_plot, maxlon_plot, minlat_plot, 
                  maxlat_plot, parallels, meridians):
+        
+        #minimum longitudes and latitudes for partition
         self.minlon = minlon
         self.maxlon = maxlon
         self.minlat = minlat
@@ -38,10 +54,18 @@ class domain(object):
         self.maxlon_plot = maxlon_plot
         self.minlat_plot = minlat_plot
         self.maxlat_plot = maxlat_plot
+        
+        #For geographic plots labelling of parallels and meridians
         self.parallels = parallels
         self.meridians = meridians
         
+        
     def setup_grid(self, d_x, d_y):
+        """
+        Function to det up the grid needed for the partition
+        """
+        
+        #grid spacings in both directions
         self.d_x = d_x
         self.d_y = d_y
 
@@ -67,7 +91,7 @@ class domain(object):
     """
     Methods to set up standard grids. 
     - domain_edges: edges for the partition grid (in general larger than region of particle release). 
-    This is determined from the particle data or can be set manually (if one knows to which domain the particles extend)
+    This is determined from the particle data or can be set manually in trajectory_data.__init__ 
     """    
     
     @classmethod
@@ -86,17 +110,6 @@ class domain(object):
         (parallels, meridians) = ([],[])
         return cls(minlon, maxlon, minlat, maxlat, 
                    minlon_plot, maxlon_plot, minlat_plot, maxlat_plot,
-                   parallels, meridians)
-
-
-    @classmethod
-    def bickley_jet_domain(cls, domain_edges):
-        r0 = 6371.
-        (minlon, maxlon, minlat, maxlat) = (0., np.pi * r0, -5000, 5000)
-        (minlon_plot, maxlon_plot, minlat_plot, maxlat_plot) = (0., np.pi * r0, -2500, 2500)
-        (parallels, meridians) = ([],[])
-        return cls( minlon,  maxlon,  minlat,  maxlat, 
-                    minlon_plot,  maxlon_plot,  minlat_plot, maxlat_plot,
                    parallels, meridians)
 
 
@@ -119,10 +132,10 @@ class trajectory_data(object):
         - time_0: reference time. time unit is in seconds since then. This is only relevant for the ocean drifters.
         - time_interval: this is the time step between two measurements to keep track on 6 hourly data, daily data, etc...
         - domain_type: specifies parameters for self.domain. Options: "north_atlantic_domain"
-            "double_gyre_domain", "bickley_jet_domain"
+            "double_gyre_domain"
         - domain_edges: edges of the domain, i.e. defining how far the partition streches. If None, 
-            domain_edges are determined from the data. 
-            This is essentially just to speed up, so that they do not have to be determined by data.
+            domain_edges are determined from the data. This is essentially just to speed up, 
+            so that they do not have to be determined by data.
         """
 
         self.drifter_longitudes = drifter_longitudes
@@ -143,7 +156,7 @@ class trajectory_data(object):
         
         #Find domain of particle trajectories
         if domain_edges == None:
-            print('Domain edges not specified. Computing them from drifter data.')
+            print('Domain edges not specified. Computing them from trajectory data.')
             i=0
             minlat = np.nanmin(self.drifter_latitudes[i])
             maxlat = np.nanmax(self.drifter_latitudes[i])
@@ -155,6 +168,7 @@ class trajectory_data(object):
                 maxlat = np.nanmax([maxlat, np.nanmax(self.drifter_latitudes[i])])
                 minlon = np.nanmin([minlon, np.nanmin(self.drifter_longitudes[i])])
                 maxlon = np.nanmax([maxlon, np.nanmax(self.drifter_longitudes[i])])
+            
             domain_edges = (minlon, maxlon, minlat, maxlat)
             print('Domain edges: ', domain_edges)
  
@@ -162,7 +176,7 @@ class trajectory_data(object):
         self.domain_type = domain_type
         self.domain_edges = domain_edges       
         self.domain = getattr(domain, domain_type)(domain_edges = domain_edges)
-        # print('Trajectory data with ' + str(self.N) + ' trajectories is set up')
+        print('Trajectory data with ' + str(self.N) + ' trajectories is set up')
     
     
     @classmethod
@@ -171,7 +185,7 @@ class trajectory_data(object):
         """
         Load data from .npz file:
             - filename has to contain: drifter_longitudes, drifter_latitudes, drifter_time (empty for model flows)
-            - time_interval_days: the days between different data points of the
+            - time_interval: the days between different data points of the
             - n_step: can restrict to every n_step'th data point. E.g. if data is 
             6-hourly (time_interval=0.25 days) and n_step=4, then trajectory_data object will be daily
             - domain_edges, domain_type: see __init__
@@ -192,7 +206,7 @@ class trajectory_data(object):
         """
         For ocean drifters: set maximum length for each trajectory and append 
         remaining parts as new trajectories
-        """        
+        """
         M = self.N
         i=0
         while i<M:
@@ -211,7 +225,7 @@ class trajectory_data(object):
     
     def start_end_times(self):
         """
-        Compute start and end times of drifters in datetime format (only for ocean drifters)
+        Compute start and end times of drifters in datetime format (only for ocean drifters to get an overview)
         """
         self.start_times = [timedelta(seconds = self.drifter_time[i][0]) + self.time_0 for i in range(len(self.drifter_time))]
         self.end_times = [timedelta(seconds = self.drifter_time[i][-1]) + self.time_0 for i in range(len(self.drifter_time))]
@@ -220,7 +234,9 @@ class trajectory_data(object):
 
     def compute_C(self, T_index):
         """
-        Compute the matrices C(t)
+        Compute the matrices C(t).
+        - T_index: index of time for which C is computed
+        C(t) is set up in sparse coordinate formate and then converted to sparse row format 
         """
         rows = []
         columns = []
@@ -237,7 +253,8 @@ class trajectory_data(object):
 
     def set_discretizing_values(self, bin_size):
         """
-        Set partition size
+        Set up partition. This function is called before the symbolic itineraries are computed.
+        bin_size: list of one or two elements. If one element, we assume a square binning.
         """
         if len(bin_size) == 1: self.d_x, self.d_y = bin_size[0], bin_size[0]
         else: self.d_x, self.d_y = bin_size[0], bin_size[1]
@@ -249,8 +266,8 @@ class trajectory_data(object):
     
     def restrict_to_subset(self, indices):
         """
-        Limit drifter data to a subset, labelled by 'indices'. Used to remove data points.
-        This is not applied to drifter_time, as for the model flows drifter_time is not defined!
+        Limit drifter data to a subset, labelled by 'indices'. Used to remove data points to generate incomplete
+        data set for the model flow. This is not applied to drifter_time, as for the model flows drifter_time is not defined.
         """
         self.drifter_longitudes = [self.drifter_longitudes[i] for i in indices]
         self.drifter_latitudes = [self.drifter_latitudes[i] for i in indices]
@@ -270,9 +287,9 @@ class trajectory_data(object):
             return index_2D
     
 
-    def compute_symbolic_sequences(self, bin_size, dt=1):
+    def compute_symbolic_itineraries(self, bin_size, dt=1):
         """
-        - Function to compute, for each drifter, the symbolic sequence given the 
+        - Function to compute, for each drifter, the symbolic itinerary given the 
         cell size of 'bin_size' and time interval of dt.
         """
         
@@ -297,10 +314,9 @@ class trajectory_data(object):
         self.initial_distribution = d
                 
 
-    def scatter_position_with_labels_geo(self, ax, labels=None, size = 4, cmap=None, norm=None,
-                                             cbar=False, cbarlabel = None, cbarticks = None,
-                                             random_shuffle = True, t=0, cbar_orientation = 'horizontal', 
-                                             extent='neither', alpha=0.6):
+    def scatter_position_with_labels_geo(self, ax, labels, size = 4, cmap=None, norm=None,
+                                             land=True, cbar=True, random_shuffle = True, t=0, 
+                                             alpha=0.6):
         """
         For earth surface: Scatter positions at certain time t with color map given by labels
         - ax: pyplot axis
@@ -308,13 +324,14 @@ class trajectory_data(object):
         - size: markersize in plot
         - cmap: colormap
         - norm: norm for colorbar
+        - land: True if land is to be filled in plot
         - cbar: Plots cbar for True
-        - cbarlabel: title of cbar
-        - cbarticks: ticks on cbar
         - random_shuffle: if True, randomly shuffle particles and labels such that 
         not one color completely covers the other
         - t: particle time for plotting
+        - alpha: transparency of scatter points
         """
+        
         lon_plot = np.array([lo[t] for lo in self.drifter_longitudes])
         lat_plot = np.array([lo[t] for lo in self.drifter_latitudes])
         
@@ -323,7 +340,7 @@ class trajectory_data(object):
         m.drawparallels(self.domain.parallels, labels=[True, False, False, True], linewidth=1., size=9, color='lightgray')
         m.drawmeridians(self.domain.meridians, labels=[False, False, False, True], linewidth=1., size=9, color='lightgray')
         m.drawcoastlines()
-        m.fillcontinents(color='dimgray')
+        if land: m.fillcontinents(color='dimgray')
         
         if random_shuffle:
             indices = np.array(range(len(lon_plot)))
@@ -333,24 +350,47 @@ class trajectory_data(object):
             labels = labels[indices]
         
         xs, ys = m(lon_plot, lat_plot)
-        if cmap == None:
-            p = ax.scatter(xs, ys, s=size, c=labels, alpha=alpha)   
-        else:
-            p = ax.scatter(xs, ys, s=size, c=labels, cmap = cmap, norm=norm, alpha=alpha)   
-        # ax.set_xlim([self.domain.minlon_plot, self.domain.maxlon_plot])
-        # ax.set_ylim([self.domain.minlat_plot, self.domain.maxlat_plot])
-        if cbar:
-            if cbarlabel == None:
-                cbar = plt.colorbar(p, shrink=.6, aspect=10, orientation=cbar_orientation, extend=extent)
-            else:
-                cbar = plt.colorbar(p, shrink=.6, aspect=10, orientation= cbar_orientation, extend=extent)
-                cbar.set_label(cbarlabel, size=9) 
-                # cbar.ax.set_ylabel(cbarlabel)
+        if cmap == None: p = ax.scatter(xs, ys, s=size, c=labels, alpha=alpha)   
+        else:  p = ax.scatter(xs, ys, s=size, c=labels, cmap = cmap, norm=norm, alpha=alpha)   
         
+        if cbar: cbar = plt.colorbar(p, shrink=.8, aspect=10, orientation='horizontal', extend='max')
+
+
+    def plot_discretized_distribution_geo(self, ax, v, cmap = None, norm=None, land = True, cbar=True):
+        """
+        Plot binned 2D field on earth surface
+        - ax: axis object
+        - v: field to plot
+        - cmap: colormap
+        - norm: norm for color bar
+        - land: land is plotted if True
+        - cbar: Plots cbar for True
+        """
+
+        #convert 1d vector to 2-dimensional array if needed
+        if v.ndim == 1: d2d = v.reshape(self.n_lats, self.n_lons)
+        else: d2d = v
+        
+        if cmap == None: cmap = 'plasma'
+        if norm == None: norm= colors.Normalize(vmin=np.ma.min(d2d), vmax=np.ma.max(d2d))
+        
+        m = Basemap(projection='mill',llcrnrlat=self.domain.minlat_plot, urcrnrlat=self.domain.maxlat_plot, 
+                    llcrnrlon=self.domain.minlon_plot, urcrnrlon=self.domain.maxlon_plot, resolution='c')
+        m.drawparallels(self.domain.parallels, labels=[True, False, False, True], linewidth=1., size=9, color='lightgray')
+        m.drawmeridians(self.domain.meridians, labels=[False, False, False, True], linewidth=1., size=9, color='lightgray')
+        m.drawcoastlines()
+        if land: m.fillcontinents(color='dimgray')
+        
+        xs, ys = m(self.domain.lon_bins_2d, self.domain.lat_bins_2d)
+    
+        if cmap == None: p = ax.pcolormesh(xs, ys, d2d, rasterized=True)
+        else: p = ax.pcolormesh(xs, ys, d2d, rasterized=True, cmap = cmap, norm = norm)
+
+        if cbar: cbar = plt.colorbar(p, shrink=.8, aspect=10, orientation="horizontal", extend='max')
+            
 
     def scatter_position_with_labels_flat(self, ax, labels, size=8, cmap=None, norm=None,
-                                          cbar=False, cbarlabel = None, cbarticks = None,
-                                          random_shuffle = True, alpha=1, t=0):
+                                          cbar=False, random_shuffle = True, alpha=1, t=0):
         """
         For flat space: Scatter positions at certain time t with color map given by labels
         See scatter_position_with_labels_geo for parameters
@@ -372,105 +412,13 @@ class trajectory_data(object):
         else:
             p = ax.scatter(lon_plot, lat_plot, s=size, c=labels, cmap = cmap, norm=norm, alpha=alpha)
         
-        if cbar:
-            if cbarlabel == None:
-                cbar = plt.colorbar(p, shrink=.6, aspect=25, ticks=cbarticks, orientation="horizontal")
-            else:
-                cbar = plt.colorbar(p, shrink=.6, aspect=25, orientation="horizontal", ticks=cbarticks)
-                cbar.set_label(cbarlabel, size=9) 
+        if cbar: cbar = plt.colorbar(p, shrink=.6, aspect=25, orientation="horizontal")
 
         ax.set_xlim([self.domain.minlon_plot, self.domain.maxlon_plot])
         ax.set_ylim([self.domain.minlat_plot, self.domain.maxlat_plot])
 
+        
 
-    def plot_discretized_distribution_geo(self, ax, v, cmap = None, norm=None, land = False, 
-                                      title = 'notitle', colbar=True, 
-                                      cbartitle = None, logarithmic = False,
-                                      cbar_orientation = 'horizontal', extent='neither'):
-        """
-        Plot binned 2D field on earth surface
-        - ax: axis object
-        - v: field to plot
-        - cmap: colormap
-        - norm: norm for color bar
-        - land: land is plotted if True
-        - title: title of figure
-        - colbar: colorbar is plotted if True
-        - cbartitle: title of colorbar
-        - logarithmic: logarithmic cbar if True
-        - cbar_orientation: placement of colorbar
-        - extent: for capping colorbar
-        """
-
-        #convert to 3-dimensional vector if needed
-        if v.ndim == 1: d2d = v.reshape(self.n_lats, self.n_lons)
-        else: d2d = v
-        
-        #plotting
-        if cmap == None: cmap = 'plasma'
-        if norm == None: norm= colors.Normalize(vmin=np.ma.min(d2d), vmax=np.ma.max(d2d))
-        
-        m = Basemap(projection='mill',llcrnrlat=self.domain.minlat_plot, urcrnrlat=self.domain.maxlat_plot, 
-                    llcrnrlon=self.domain.minlon_plot, urcrnrlon=self.domain.maxlon_plot, resolution='c')
-        m.drawparallels(self.domain.parallels, labels=[True, False, False, True], linewidth=1., size=9, color='lightgray')
-        m.drawmeridians(self.domain.meridians, labels=[False, False, False, True], linewidth=1., size=9, color='lightgray')
-        m.drawcoastlines()
-
-        if land: m.fillcontinents(color='dimgray')
-        xs, ys = m(self.domain.lon_bins_2d, self.domain.lat_bins_2d)
-        if logarithmic:
-            p = ax.pcolormesh(xs, ys, d2d, rasterized=True, cmap =  cmap,  norm=colors.LogNorm())
-        else:
-            p = ax.pcolormesh(xs, ys, d2d, rasterized=True, cmap =  cmap, norm=norm)
-
-        if colbar: 
-            if cbar_orientation == 'horizontal':
-                cbar = plt.colorbar(p, shrink=.8, aspect=10, orientation="horizontal", extend=extent)
-            else:
-                cbar = plt.colorbar(p, shrink=.6, aspect=40, extend=extent)
-            cbar.ax.tick_params(labelsize=9) 
-            if cbartitle is not None:
-                cbar.set_label(cbartitle, size=9)  
-        
-    
-    def plot_discretized_distribution_flat(self, ax, v, cmap = None, norm=None, land = False, 
-                                      title = 'notitle', colbar=True, 
-                                      cbartitle = None, logarithmic = False,
-                                      cbar_orientation = 'horizontal'):
-        """
-        See plot_discretized_distribution_gee for parameter description
-        """
-
-        #convert to 3-dimensional vector if needed
-        if v.ndim == 1: d2d = v.reshape(self.n_lats, self.n_lons)
-        else: d2d = v
-        
-        #plotting
-        if cmap == None: cmap = 'plasma'
-        if norm == None: norm= colors.Normalize(vmin=np.ma.min(d2d), vmax=np.ma.max(d2d))
-        
-        xs = self.domain.lon_bins_2d
-        ys = self.domain.lat_bins_2d
-        
-        if logarithmic:
-            p = ax.pcolormesh(xs, ys, d2d, rasterized=True, cmap =  cmap,  norm=colors.LogNorm())
-        else:
-            p = ax.pcolormesh(xs, ys, d2d, rasterized=True, cmap =  cmap, norm=norm)# , vmin=-20, vmax=1)
-        
-        ax.set_xlim([self.domain.minlon_plot, self.domain.maxlon_plot])
-        ax.set_ylim([self.domain.minlat_plot, self.domain.maxlat_plot])
-
-        if colbar: 
-            if cbar_orientation == 'horizontal':
-                cbar = plt.colorbar(p, shrink=.6, aspect=10, orientation="horizontal")
-            else:
-                cbar = plt.colorbar(p, shrink=.6, aspect=40)
-            cbar.ax.tick_params(labelsize=9) 
-            if cbartitle is not None:
-                cbar.set_label(cbartitle, size=9) 
-        
-        
-        
 
 class bipartite_network(object):
     """
@@ -483,21 +431,6 @@ class bipartite_network(object):
         self.M = B.shape[1]        
 
 
-    def stochastic_complement_adjacency_matrix(self, space = 'X'):
-        """
-        Return adjacency matrix for stochastic complement, i.e. two-step random walk
-        """
-        if space == 'X':
-            q = np.array(sparse.csr_matrix.sum(self.adjacency_matrix, axis=0))[0,:]
-            PI_q_inv = sparse.diags([1/qi if qi!=0 else 0 for qi in q])
-            return (self.adjacency_matrix.dot(PI_q_inv)).dot(self.adjacency_matrix.transpose())
-        
-        elif space == 'Y': 
-            p = np.array(sparse.csr_matrix.sum(self.adjacency_matrix, axis=1))[:,0]
-            PI_p_inv = sparse.diags([1/pi if pi!=0 else 0 for pi in p])
-            return (self.adjacency_matrix.transpose()).dot(PI_p_inv).dot(self.adjacency_matrix)
-
-
     def projection_adjacency_matrix(self, space = 'X'):
         """
         Return adjacency matrix for projection, i.e. GG^T (or G^TG)
@@ -508,65 +441,30 @@ class bipartite_network(object):
         elif space == 'Y': 
             return self.adjacency_matrix.transpose().dot(self.adjacency_matrix)
 
- 
-    def stochastic_complement_laplacian_spectrum(self, K=20):     
-        print('Computing the SVD of the stochastic complementation.') 
-        p = np.array(sparse.csr_matrix.sum(self.adjacency_matrix, axis=1))[:,0]
-        q = np.array(sparse.csr_matrix.sum(self.adjacency_matrix, axis=0))[0,:]
-        PI_p_inv_sqrt = sparse.diags([1/np.sqrt(pi) if pi!=0 else 0 for pi in p])
-        PI_q_inv_sqrt = sparse.diags([1/np.sqrt(qi) if qi!=0 else 0 for qi in q])
-        B_hat = PI_p_inv_sqrt.dot(self.adjacency_matrix).dot(PI_q_inv_sqrt)        
-        u, s, vt = sparse.linalg.svds(B_hat, K)
-        indices = np.argsort(s)[::-1]    
-        u=u[:,indices]
-        s = s[indices]
-        vt = vt[indices,:]        
-        return [PI_p_inv_sqrt.dot(u), s, PI_q_inv_sqrt.dot(vt.transpose())]
-    
-    
+     
     def projection_laplacian_spectrum(self, K=20):
-        # print('Computing the SVD of the projection.')
+        """
+        Return spectrum of the projection of the bipartite network, cf. eq. (10)
+        """
+        
         p = np.array(sparse.csr_matrix.sum(self.adjacency_matrix.T, axis=1))[:,0]
         p = self.adjacency_matrix.dot(p)
         PI_p_inv_sqrt = sparse.diags([1/np.sqrt(pi) if pi!=0 else 0 for pi in p])
-        B_hat = PI_p_inv_sqrt.dot(self.adjacency_matrix)
-        u, s, vt = sparse.linalg.svds(B_hat, K)
+        R = PI_p_inv_sqrt.dot(self.adjacency_matrix)
+        u, s, vt = sparse.linalg.svds(R, K)
         indices = np.argsort(s)[::-1]    
         u=u[:,indices]
         s = s[indices]
         vt = vt[indices,:]
         return [PI_p_inv_sqrt.dot(u), s, vt.transpose()]
-        
-
-    def projection_laplacian_spectrum_normalized_cut_Ng(self, K=20):
-        # print('Computing the SVD of the projection (Ng Jordan).')
-        p = np.array(sparse.csr_matrix.sum(self.adjacency_matrix.T, axis=1))[:,0]
-        p = self.adjacency_matrix.dot(p)
-        PI_p_inv_sqrt = sparse.diags([1/np.sqrt(pi) if pi!=0 else 0 for pi in p])
-        B_hat = PI_p_inv_sqrt.dot(self.adjacency_matrix)
-        u, s, vt = sparse.linalg.svds(B_hat, K)
-        indices = np.argsort(s)[::-1]
-        u=u[:,indices]
-        s = s[indices]
-        vt = vt[indices,:]
-        
-        return [u, s, vt.transpose()]
-
-
-    def degrees(self):
-        p = np.array(sparse.csr_matrix.sum(self.adjacency_matrix.T, axis=1))[:,0]
-        p = self.adjacency_matrix.dot(p)
-        q = np.array(sparse.csr_matrix.sum(self.adjacency_matrix, axis=1))[:,0]
-        q = self.adjacency_matrix.T.dot(q)        
-        return [p, q]
 
 
 def construct_dendrogram(networks):
     """
     Construct a dendrogram from a hierarchical list of 'undirected_network' objects
     - networks: list of network groups. len(networks[0])=1, len(networks[1])=2, etc.
-    Note that this ia a bit hacky, as the NCut increases with the number of clusters, which is#
-    different from the usual dendrogram... Therefore, we flip the axis later while plotting. 
+    Note that this ia a bit hacky, as the NCut increases with the number of clusters, which is
+    different from the usual dendrogram... Therefore, we flip the axis later when plotting.
     """
     K = len(networks)
     network_labels = [[nw.cluster_label for nw in networks[i]] for i in range(K)]
@@ -609,14 +507,15 @@ class undirected_network(object):
                  cluster_volume=np.array([]), cluster_label = 0):
         
         """
-        adjacency_matrix: format sparse.csr_matrix. If it is not symmetric it is symmetrized.
-        region_indices: indices corresponding to network domain.
-        cluster_volume: vector of volume of the nodes inside the cluster.
+        - adjacency_matrix: format sparse.csr_matrix. If it is not symmetric it is symmetrized.
+        - cluster_indices: indices corresponding to network domain.
+        - cluster_volume: vector of volume of the nodes inside the cluster. The volume of a node is equal to
+        the sum over all the weights it connects to. The colume of a set of nodes is equal to the
+        denomiator of a term in NCut, cf. eq. (6)
+        - cluster_label: each cluster receives a label so that we can later distinguish them.
         """
-        if len(cluster_indices)==0:
-            cluster_indices = np.array(range(adjacency_matrix.shape[0]))
-        if len(cluster_volume)==0:
-            cluster_volume = np.array(sparse.csr_matrix.sum(adjacency_matrix, axis=1))[:,0]
+        if len(cluster_indices)==0: cluster_indices = np.array(range(adjacency_matrix.shape[0]))
+        if len(cluster_volume)==0: cluster_volume = np.array(sparse.csr_matrix.sum(adjacency_matrix, axis=1))[:,0]
         
         self.adjacency_matrix = adjacency_matrix
         self.cluster_indices = cluster_indices
@@ -687,8 +586,9 @@ class undirected_network(object):
 
     def drho_split(self, indices_1, indices_2):
         """
-        If we propose to split a cluster, this returns the changes in the coherence ratio for a split into
-        indices_1 and indices_2
+        If we propose to split a cluster, this function returns the changes in the coherence ratio for a split into
+        indices_1 and indices_2. We maximize this change in the coherence ratio, which is equal to
+        minimizing the NCut.
         """
         cluster_volume_1 = np.sum(self.cluster_volume[indices_1])
         cluster_volume_2 = np.sum(self.cluster_volume[indices_2])
@@ -701,7 +601,8 @@ class undirected_network(object):
         """
         Implementation of hierarchical clustering according to Shi & Malik 2000.
         At each iteration, one cluster is added, minimizing the global NCut. We implement this
-        by computing the increase in rho and choose the maximum increase.
+        by computing the increase in the coherence ratio rho and choose the maximum increase. This is
+        equivalent to minimizing the global NCut, cf. eq. A2
         """
         networks = {}
         networks[0] = [self]
@@ -751,6 +652,7 @@ class undirected_network(object):
             indices_1 = np.argwhere(V_fiedler<=cutoff_cluster)[:,0]
             indices_2 = np.argwhere(V_fiedler>cutoff_cluster)[:,0]
             
+            #If a cluster is split, the largest sub-cluster receives the same label.
             if len(indices_1)<len(indices_2):
                 ind_ = indices_1.copy()
                 indices_1= indices_2.copy()
@@ -774,6 +676,6 @@ class undirected_network(object):
             
             networks[i] = networks[i-1].copy()
             networks[i].pop(i_cluster)
-            networks[i] += network_children #append in the back
+            networks[i] += network_children #append in the end
         
         self.clustered_networks = networks
