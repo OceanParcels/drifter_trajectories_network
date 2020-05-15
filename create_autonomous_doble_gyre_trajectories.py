@@ -6,16 +6,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.integrate import odeint
 
-A = 0.25
-delta = 0.25
-omega = 2 * np.pi
 
 def vel(y,t):
     x1 = y[0]
     x2 = y[1]
-    f = delta * np.sin(omega * t) * x1**2 + (1-2 * delta * np.sin(omega * t)) * x1
-    u = -np.pi * A * np.sin(np.pi * f) * np.cos(np.pi * x2)
-    v = np.pi * A *np.cos(np.pi * f) * np.sin(np.pi * x2) * (2 * delta * np.sin(omega * t ) * x1 +  1-2*delta *np.sin(omega * t))    
+    u = -np.pi * np.sin(np.pi * x1) * np.cos(np.pi * x2)
+    v = np.pi * np.cos(np.pi * x1) * np.sin(np.pi * x2)
     return [u,v]
 
 
@@ -25,8 +21,8 @@ dt_int = 0.001 #integration time step
 n_it = int(dt_output / dt_int) #number of integration steps
 
 t = np.arange(0, tau+dt_output, dt_int)
-x_range = np.linspace(0,2,200)
-y_range = np.linspace(0,1,100)
+x_range = np.linspace(0,2,202)[1:-1]
+y_range = np.linspace(0,1,102)[1:-1]
 
 #Initial conditions
 X0, Y0 = np.meshgrid(x_range, y_range)
@@ -47,5 +43,5 @@ for i in range(len(X0)):
     trajectories_x[i] = sol[:,0][::n_it]
     trajectories_y[i] = sol[:,1][::n_it]
 
-np.savez("double_gyre_trajectories_np_" + str(len(x_range)*len(y_range)) + '_tau_' + str(tau) + '_dt_' + str(dt_output), 
+np.savez("double_gyre_autonomous_trajectories_np_" + str(len(x_range)*len(y_range)) + '_tau_' + str(tau) + '_dt_' + str(dt_output), 
          drifter_longitudes = trajectories_x, drifter_latitudes = trajectories_y, drifter_time = [])

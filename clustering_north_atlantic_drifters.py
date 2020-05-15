@@ -1,211 +1,184 @@
-# -*- coding: utf-8 -*-
 """
-Created on Sat Apr 18 14:21:01 2020
-
-@author: HP
+Script for clustering of Noarth Atlantic drifter data set in particle and bin space
 """
 
 import numpy as np
 import matplotlib.pyplot as plt
-from create_network import trajectory_data, undirected_network, bipartite_network, construct_dendogram
+from particle_and_network_classes import trajectory_data, undirected_network, bipartite_network, construct_dendrogram
 from scipy.cluster import hierarchy
 import matplotlib
 import matplotlib.colors
 
-d_deg=[1.0]
-max_length = 365
-particle_network = True
-bin_network = False
-adjacency_matrix_type = 'random_walk_matrix_'
+"""
+2 options: 
+    1. tmax = 365 days for initial time, final time and dendogram. Spectrum.
+    2. tmax = inf initial time. 
+"""
+plot_365days=True #True for option 1
 
-domain_edges = (-100., 80, 0, 85) # full domain, to cover all points along any trajectory    
+if plot_365days:
+    colors = np.array(['midnightblue', 'dimgray', 'dimgray', 'dimgray', 'sienna', 'skyblue', 'dimgray',
+                        'firebrick', 'dimgray', 'dodgerblue', 'aqua', 'dimgray', 'dimgray', 
+                        'mediumaquamarine', 'teal', 'dimgray', 'coral','dimgray','orange','purple'])
+    K = 20 #number of eigenvectors to be computed
+    L=20 #Level of hierarchical clustering
+    d_deg=[1.0]
+    max_length = 365
+    t_plot = 0
+    plot_paper = True
+    plot_labels = True
+    plot_spectrum = True
+
+else:
+    K = 20 #number of eigenvectors to be computed
+    L=16 #Number of clusters in hierarchical clustering. This is chosen such that the max NCut is similar to option 1 (around 3.6)
+    d_deg=[1.0]
+    max_length = None
+    t_plot = 0
+    plot_dendrogram = False
+    plot_spectrum = False
+    plot_labels=False
+    colors = np.array(['midnightblue', 'dimgray', 'dimgray', 'sienna', 'dimgray', 'skyblue', 'dimgray',
+                        'dimgray', 'dimgray', 'aqua', 'firebrick', 'dodgerblue', 'coral', 
+                        'dimgray', 'dimgray', 'dimgray', 'teal','dimgray','dimgray','dimgray'])
+
+
+figname  = './figures/north_atlantic/north_atlantic_ddeg1_maxlen_' + str(max_length) + 't_' + str(t_plot)
+#Load daily data
 drifter_data = trajectory_data.from_npz('drifter_data_north_atlantic/drifterdata_north_atlantic.npz',
-                                         time_interval_days=0.25, n_step = 4, domain_type = "north_atlantic_domain",
-                                         domain_edges = domain_edges, set_nans=False)
+                                          time_interval=0.25, n_step = 4, domain_type = "north_atlantic_domain")
 
-if max_length is not None:
-    drifter_data.set_max_length(max_length = max_length)
+if max_length is not None: drifter_data.set_max_length(max_length = max_length)
 
-# drifter_data.set_min_length(min_length = 20)
-
-drifter_data.set_nans(constrain_to_domain=True) #To enforce entire data on north atlantic
-drifter_data.compute_symbolic_sequences(d_deg = d_deg, dt_days = 1, 
-                                            trajectory_segments=False)
-
+drifter_data.compute_symbolic_sequences(bin_size = d_deg, dt = 1)
 trajectory_lenghts = [len(s) for s in drifter_data.symbolic_sequence]
 T = np.max(trajectory_lenghts)
 
-#Compute C(t) matrices
+#Compute C and G matrices
 C = []
 for i in range(T): C.append(drifter_data.compute_C(i))
+G = C[0].copy()
+for i in range(1, T): G += C[i]
 
-path_network = C[0].copy()
-for i in range(1, T): path_network += C[i]
+#Set up networks and hierarchical clustering according to Shi&Malik 2000
+B = bipartite_network(G)
+A = undirected_network(B.projection_adjacency_matrix(space = 'X'))    
+A1 = A.largest_connected_component()
+w, v = A1.compute_laplacian_spectrum(K=40)
+A1.hierarchical_clustering_ShiMalik(K)    
+networks = A1.clustered_networks
 
-if particle_network:
-    #particle space
-    B = bipartite_network(path_network)
-    # if adjacency_matrix_type == 'stochastic_complement':
-    #     A = undirected_network(B.stochastic_complement_adjacency_matrix(space = 'X'))
-    # else:
-    #     A = undirected_network(B.projection_adjacency_matrix(space = 'X'))
+if plot_365days:
+    Z = construct_dendrogram([networks[i] for i in range(L)])
     
-    R = B.random_walk_matrix()
-    A = undirected_network(R.dot(R.transpose()))
-    A.connected_components()
-    A1 = A.sub_networks[0]
-    w, v = A1.compute_laplacian_spectrum(K=40)
-    
-    K = 20
-    A1.hierarchical_clustering_ShiMalik(K)    
-    networks = A1.clustered_networks
-    
-    L=20
-    Z = construct_dendogram([networks[i] for i in range(L)])
-        
-    f = plt.figure(constrained_layout=True, figsize = (10,4))
-    gs = f.add_gridspec(1, 2)
-    ax = f.add_subplot(gs[0, 1])
-    
+    f = plt.figure(constrained_layout=True, figsize = (10,8))
+    gs = f.add_gridspec(2, 4)
+    ax = f.add_subplot(gs[1, 1:3])
     matplotlib.rcParams['lines.linewidth'] = 3
-    
-    colors2 = np.array(['midnightblue', 'skyblue', 'firebrick', 'b', 'salmon', 'olivedrab', 'rosybrown',
-                        'darkred', 'darkslategrey', 'sienna', 'limegreen', 'orange', 'darkorchid', 
-                        'yellow', 'black', 'aqua', 'crimson', 'indigo', 'dimgray', 'darkviolet',
-                        'midnightblue', 'skyblue', 'firebrick', 'b', 'salmon', 'olivedrab', 'rosybrown',
-                        'midnightblue', 'skyblue', 'firebrick', 'b', 'salmon', 'olivedrab', 'rosybrown',
-                        'midnightblue', 'skyblue', 'firebrick', 'b', 'salmon', 'olivedrab', 'rosybrown'])
-    
-    hierarchy.dendrogram(Z, color_threshold=0.2, distance_sort='ascending', link_color_func=lambda k: 'k') #, labels=labels_alphabetical)
-    
-    ax.set_xlabel('Cluster')
+    labels = ['A', '.','.','.','B','C','.','D','.','E','F','.','.','G','H','.','I','.','J','K']
+    hierarchy.dendrogram(Z, color_threshold=0.2, distance_sort='ascending', labels=labels, link_color_func=lambda k: 'k') #, labels=labels_alphabetical)
     
     ncut = []
     for i in range(len(networks)):
         r = np.sum([networks[i][j].rho for j in range(len(networks[i]))])
         ncut.append(len(networks[i])-r)
-    
     ncut=np.array(ncut)[:L]
     
     plt.yticks(np.arange(np.max(ncut)+.2, 0, -0.5)[::-1], np.max(ncut)+.2-np.arange(np.max(ncut)+.2, 0, -0.5)[::-1])
     ax.set_ylabel('Ncut')
-    ax = f.add_subplot(gs[0, 0])
-    colors = np.array(['midnightblue', 'skyblue', 'firebrick', 'b', 'salmon', 'olivedrab', 'rosybrown',
-                        'darkred', 'darkslategrey', 'sienna', 'limegreen', 'orange', 'darkorchid', 
-                        'yellow', 'black', 'aqua', 'crimson', 'indigo', 'dimgray', 'darkviolet',])
+    ax.set_title('(c) cluster hierarchy')
+        
+    ax = f.add_subplot(gs[0, 0:2])
+    ax.set_title('(a) particle labels at initial time')
     bounds = np.arange(-0.5,L+0.5,1)
-    # bounds = list(range(K+1))
-    
     norm = matplotlib.colors.BoundaryNorm(bounds, len(bounds))
     cmap = matplotlib.colors.ListedColormap(colors)    
-    
-    field_plot = np.ones(path_network.shape[0]) *(-10000)
-        
-    for k in range(L):
-        field_plot[networks[L-1][k].cluster_indices]= networks[L-1][k].cluster_label
-        
-    # field_plot[list(components_sorted[0])]= A.eigenvectors[:,k]
+    field_plot = np.ones(G.shape[0]) *(-10000)
+    for k in range(L): field_plot[networks[L-1][k].cluster_indices]= networks[L-1][k].cluster_label
     field_plot = np.ma.masked_array(field_plot, field_plot==-10000)   
-    
-    drifter_data.scatter_initial_position_with_labels(field_plot, ax, cmap=cmap, norm=norm,
-                                                      cbarticks = list(range(K)), size=10)
-    
-    left, bottom, width, height = [0.32, 0.2, 0.15, 0.4]
-    ax2 = f.add_axes([left, bottom, width, height])
-    
-    # ax2s = f.add_subplot(gs[2, 1])
-    ax2.plot(range(L), w[:L], 'o', color='maroon', markersize=2)
-    ax2.plot(range(L,30), w[L:30], 'o', color='k', markersize=2)
-    ax2.tick_params(axis="y",direction="in", pad=-27)
-    xticks = [round(n,2) for n in np.arange(0.05,0.3,0.1)]
-    plt.yticks(xticks, xticks)
-    # ax2.set_facecolor('xkcd:mint green')
-    plt.xticks([])
-    plt.grid(True)
-    ax.set_ylabel(r'$\lambda$')
-    
-    f.savefig('./figures/north_atlantic/north_atlantic_' + adjacency_matrix_type + 'particles_maxlen_' + str(max_length), dpi=300)
-    
+    drifter_data.scatter_position_with_labels_geo(ax, field_plot, cmap=cmap, norm=norm,
+                                                      cbar=False, cbarticks = list(range(K)), size=10,
+                                                      random_shuffle=True, t=0)
 
-
-if bin_network:
-    #bin space
-    B = bipartite_network(path_network)
-    if adjacency_matrix_type == 'stochastic_complement':
-        A = undirected_network(B.stochastic_complement_adjacency_matrix(space = 'Y'))
-    else:
-        A = undirected_network(B.projection_adjacency_matrix(space = 'Y'))
+    t = plt.annotate('A', (0.25,0.2), xycoords='axes fraction', size=18, color='midnightblue')
+    t.set_bbox(dict(facecolor='w', alpha=0.7))
     
-    A.connected_components()
-    A1 = A.sub_networks[0]
-    w, v = A1.compute_laplacian_spectrum(K=40)
+    t =plt.annotate('B', (0.36,0.56), xycoords='axes fraction', size=18, color='sienna')
+    t.set_bbox(dict(facecolor='w', alpha=0.7))
     
-    K = 25
-    A1.hierarchical_clustering_ShiMalik(K)    
-    networks = A1.clustered_networks
+    t =plt.annotate('C', (0.65,0.05), xycoords='axes fraction', size=18, color='skyblue')
+    t.set_bbox(dict(facecolor='gray', alpha=0.8))
     
-    L=13
-    Z = construct_dendogram([networks[i] for i in range(L)])
+    t =plt.annotate('D', (0.7,0.65), xycoords='axes fraction', size=18, color='firebrick')
+    t.set_bbox(dict(facecolor='w', alpha=0.7))
+    
+    t =plt.annotate('E', (0.32,0.34), xycoords='axes fraction', size=18, color='dodgerblue')
+    t.set_bbox(dict(facecolor='w', alpha=0.7))
         
-    f = plt.figure(constrained_layout=True, figsize = (10,4))
-    gs = f.add_gridspec(1, 2)
-    ax = f.add_subplot(gs[0, 1])
+    t =plt.annotate('F', (0.02,0.28), xycoords='axes fraction', size=18, color='aqua')
+    t.set_bbox(dict(facecolor='w', alpha=0.3))
     
-    matplotlib.rcParams['lines.linewidth'] = 3
+    t =plt.annotate('G', (0.52,0.14), xycoords='axes fraction', size=18, color='mediumaquamarine')
+    t.set_bbox(dict(facecolor='gray', alpha=0.8))
     
-    colors2 = np.array(['midnightblue', 'skyblue', 'firebrick', 'b', 'salmon', 'olivedrab', 'rosybrown',
-                        'darkred', 'darkslategrey', 'sienna', 'limegreen', 'orange', 'darkorchid', 
-                        'yellow', 'black', 'aqua', 'crimson', 'indigo', 'dimgray', 'darkviolet',
-                        'midnightblue', 'skyblue', 'firebrick', 'b', 'salmon', 'olivedrab', 'rosybrown',
-                        'midnightblue', 'skyblue', 'firebrick', 'b', 'salmon', 'olivedrab', 'rosybrown',
-                        'midnightblue', 'skyblue', 'firebrick', 'b', 'salmon', 'olivedrab', 'rosybrown'])
+    t =plt.annotate('H', (0.5,0.3), xycoords='axes fraction', size=18, color='teal')
+    t.set_bbox(dict(facecolor='w', alpha=0.7))    
     
-    hierarchy.dendrogram(Z, color_threshold=0.2, distance_sort='ascending', link_color_func=lambda k: 'k') #, labels=labels_alphabetical)
+    t =plt.annotate('I', (0.48,0.68), xycoords='axes fraction', size=18, color='coral')
+    t.set_bbox(dict(facecolor='w', alpha=0.7))
     
-    ax.set_xlabel('Cluster')
+    t =plt.annotate('J', (0.92,0.8), xycoords='axes fraction', size=18, color='orange')
+    t.set_bbox(dict(facecolor='gray', alpha=0.8))
     
-    ncut = []
-    for i in range(len(networks)):
-        r = np.sum([networks[i][j].rho for j in range(len(networks[i]))])
-        ncut.append(len(networks[i])-r)
+    t =plt.annotate('K', (0.7,0.33), xycoords='axes fraction', size=18, color='purple')
+    t.set_bbox(dict(facecolor='w', alpha=0.7))
+
+    ax = f.add_subplot(gs[0, 2:4])
+    ax.set_title('(b) particle labels at final time')
+    drifter_data.scatter_position_with_labels_geo(ax, field_plot, cmap=cmap, norm=norm,
+                                                      cbar=False, cbarticks = list(range(K)), size=10,
+                                                      random_shuffle=True, t=-1)
     
-    ncut=np.array(ncut)[:L]
+    f.savefig('./figures/north_atlantic/na_clusters_tmax365', dpi=300)
     
-    plt.yticks(np.arange(np.max(ncut)+.2, 0, -0.5)[::-1], np.max(ncut)+.2-np.arange(np.max(ncut)+.2, 0, -0.5)[::-1])
-    ax.set_ylabel('Ncut')
+    #Plot spectrum with lines corresponding to known regions
+    labels = np.array(labels)
+    inds_deleted = np.argwhere(labels=='.')[:,0]
+    f, ax = plt.subplots(figsize = (7,5)) 
+    x_used_significant = np.array([i for i in range(L) if i not in inds_deleted])
+    ax.plot(x_used_significant, w[x_used_significant], 'o', color='maroon', markersize=4)
+    ax.plot(inds_deleted, w[inds_deleted], 'o', color='darkgrey', markersize=4)
+    ax.plot(range(L,30), w[L:30], 'o', color='k', markersize=4)
+    ax.grid(True)
+    ax.axvline(4.5, color = 'midnightblue', linestyle = '--', linewidth = 1.5, label='Subtropical | Subpolar Gyre')
+    ax.axvline(7.5, color = 'sienna', linestyle = '--', linewidth = 1.5, label='Subpolar Gyre | Nordic Seas')
+    ax.axvline(9.5, color = 'skyblue', linestyle = '--', linewidth = 1.5, label = 'Northern | Southern Subtropics')
+    ax.axvline(10.5, color = 'aqua', linestyle = '--', linewidth = 1.5, label = 'Caribbean Sea')
+    ax.axvline(14.5, color = 'dodgerblue', linestyle = '--', linewidth = 1.5, label = 'Western Boundary Current incl. Bay of Biscay')
+    ax.axvline(16.5, color = 'coral', linestyle = '--', linewidth = 1.5, label = 'Greenland Current')
+    ax.axvline(18.5, color = 'orange', linestyle = '--', linewidth = 1.5, label = 'Barents Sea')
+    ax.axvline(19.5, color = 'purple', linestyle = '--', linewidth = 1.5, label = 'Bay of Biscay')
+    plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.07), fancybox=True, shadow=False, ncol=2)
+    ax.set_ylabel(r'$\lambda$')
+    ax.set_title(r'Spectrum of $L_s$', size=14) 
+    
+    f.savefig('./figures/north_atlantic/na_clusters_tmax365_spectrum', dpi=300, bbox_inches='tight')
+    
+else:
+    f = plt.figure(constrained_layout=True, figsize = (5,4))
+    gs = f.add_gridspec(1, 1)
+    
     ax = f.add_subplot(gs[0, 0])
-    colors = np.array(['midnightblue', 'skyblue', 'firebrick', 'b', 'salmon', 'olivedrab', 'rosybrown',
-                        'darkred', 'darkslategrey', 'sienna', 'limegreen', 'orange', 'darkorchid', 
-                        'yellow', 'black', 'aqua', 'crimson', 'indigo', 'dimgray', 'darkviolet',])
-    bounds = np.arange(-0.5,L+0.5,1)
-    # bounds = list(range(K+1))
+    if t_plot==0: ax.set_title('Particle labels at initial time')
+    if t_plot==-1: ax.set_title('Particle labels at final time')
     
+    bounds = np.arange(-0.5,L+0.5,1)
     norm = matplotlib.colors.BoundaryNorm(bounds, len(bounds))
     cmap = matplotlib.colors.ListedColormap(colors)    
-    
-    field_plot = np.ones(path_network.shape[1]) *(-10000)
-        
-    for k in range(L):
-        field_plot[networks[L-1][k].cluster_indices]= networks[L-1][k].cluster_label
-        
-    # field_plot[list(components_sorted[0])]= A.eigenvectors[:,k]
+    field_plot = np.ones(G.shape[0]) *(-10000)
+    for k in range(L): field_plot[networks[L-1][k].cluster_indices]= networks[L-1][k].cluster_label
     field_plot = np.ma.masked_array(field_plot, field_plot==-10000)   
-    
-    drifter_data.plot_discretized_distribution(field_plot, ax, cmap=cmap, norm=norm) 
-                                                      # cbarticks = list(range(K)), size=10)
-    
-    left, bottom, width, height = [0.32, 0.2, 0.15, 0.4]
-    ax2 = f.add_axes([left, bottom, width, height])
-    
-    # ax2s = f.add_subplot(gs[2, 1])
-    ax2.plot(range(L), w[:L], 'o', color='maroon', markersize=2)
-    ax2.plot(range(L,30), w[L:30], 'o', color='k', markersize=2)
-    ax2.tick_params(axis="y",direction="in", pad=-27)
-    xticks = [round(n,2) for n in np.arange(0.05,0.3,0.1)]
-    plt.yticks(xticks, xticks)
-    # ax2.set_facecolor('xkcd:mint green')
-    plt.xticks([])
-    plt.grid(True)
-    ax.set_ylabel(r'$\lambda$')
-    
-    f.savefig('./figures/north_atlantic/north_atlantic_' + adjacency_matrix_type + 'bins_maxlen_' + str(max_length), dpi=300)
+    drifter_data.scatter_position_with_labels_geo(ax, field_plot, cmap=cmap, norm=norm,
+                                                      cbar=False, cbarticks = list(range(K)), size=10,
+                                                      random_shuffle=False, t=t_plot)
+    f.savefig('./figures/north_atlantic/na_clusters_tmaxinf', dpi=300)

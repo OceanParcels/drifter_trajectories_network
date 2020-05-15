@@ -7,20 +7,17 @@ Created on Mon Apr 20 20:18:00 2020
 
 import numpy as np
 import matplotlib.pyplot as plt
-from create_network import trajectory_data
+from particle_and_network_classes import trajectory_data
 from datetime import datetime, timedelta
 import matplotlib.colors as colors
 
 d_deg=[2.0]
 domain_edges = (-100., 80, 0, 85) # full domain, to cover all points along any trajectory    
 drifter_data = trajectory_data.from_npz('drifter_data_north_atlantic/drifterdata_north_atlantic.npz',
-                                         time_interval_days=0.25, n_step = 1, domain_type = "north_atlantic_domain",
-                                         domain_edges = domain_edges, set_nans=False)
-
-drifter_data.set_nans(constrain_to_domain=True) #To enforce entire data on north atlantic
+                                          time_interval=0.25, n_step = 1, domain_type = "north_atlantic_domain")
    
 #Total counts
-drifter_data.compute_symbolic_sequences(d_deg = d_deg, dt_days = 0.25)
+drifter_data.compute_symbolic_sequences(bin_size = d_deg, dt = 0.25)
 sequence = drifter_data.symbolic_sequence
 total_symbols = []
 for s in sequence: total_symbols += list(s[:])
@@ -56,29 +53,41 @@ x = range(len(t0_range))
 y = np.arange(30,750,30)
 x_ticks = [t0_range[i].strftime("%Y") for i in range(len(t0_range))]
 
-f = plt.figure(constrained_layout=True, figsize = (6,5.5))
-gs = f.add_gridspec(2, 2)
+
+#drifter lifetimes
+lifetimes = np.array([t[-1]-t[0] for t in drifter_data.drifter_time]) / 86400
+lifetimes = lifetimes //(30.5)
+
+f = plt.figure(constrained_layout=True, figsize = (9,3))
+gs = f.add_gridspec(1, 3)
 
 ax1 = f.add_subplot(gs[0, 0])
-ax1.set_title('a) total data', size=12)
+ax1.set_title('(a) total data', size=12)
 norm = colors.Normalize(0,20000)
-drifter_data.plot_discretized_distribution(drifter_distribution, ax1, land=True, cmap='plasma', 
-                                           cbar_orientation ='vertical', logarithmic=False,
+
+drifter_data.plot_discretized_distribution_geo(ax1, drifter_distribution, land=True, cmap='OrRd', 
+                                           cbar_orientation ='horizontal', logarithmic=False,
                                            norm = norm, extent='max')
 
 norm = colors.Normalize(0,20)
 ax2 = f.add_subplot(gs[0, 1])
-ax2.set_title('b) drifter release', size=12)
-drifter_data.plot_discretized_distribution(drifter_distribution0, ax2, land=True, cmap='plasma', 
-                                           cbar_orientation ='vertical', logarithmic=False,
+ax2.set_title('(b) drifter release', size=12)
+drifter_data.plot_discretized_distribution_geo(ax2, drifter_distribution0, land=True, cmap='OrRd', 
+                                           cbar_orientation ='horizontal', logarithmic=False,
                                            norm=norm, extent = 'max')
 
-ax4 = f.add_subplot(gs[1, 0:2])
-cmap = ax4.pcolormesh(x, y, counts.transpose(), cmap = 'cividis')
-plt.colorbar(cmap, orientation = 'horizontal')
-plt.xticks(x[::24], x_ticks[::24], rotation='vertical')
-plt.ylabel('Trajectory length (days)', size=10)
-plt.xlabel('Start time', size=11)
-plt.title('c) number of synchronous drifter trajectories ', size=12)
+norm = colors.Normalize(0,24)
+ax3 = f.add_subplot(gs[0, 2])
+ax3.set_title('(c) drifter lifetime (months)', size=12)
+drifter_data.scatter_position_with_labels_geo(ax3, lifetimes, cbar=True, norm=norm, size=3, t=0, 
+                                              cmap = 'cividis', extent="max", alpha=1)
+
+# ax4 = f.add_subplot(gs[1, :2])
+# cmap = ax4.pcolormesh(x, y, counts.transpose(), cmap = 'OrRd')
+# plt.colorbar(cmap, orientation = 'horizontal')
+# plt.xticks(x[::24], x_ticks[::24], rotation='vertical')
+# plt.ylabel('Trajectory length (days)', size=10)
+# plt.xlabel('Start time', size=11)
+# plt.title('(c) number of synchronous drifter trajectories ', size=12)
 
 plt.savefig('figures/north_atlantic/drifter_dataset_info', dpi=300)
