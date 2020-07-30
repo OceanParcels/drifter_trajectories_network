@@ -148,25 +148,10 @@ if plot_365days:
     f.savefig('./figures/na_clusters_tmax365', dpi=300)
     
     #Plot spectrum with lines corresponding to known regions
-    # labels = np.array(labels)
-    # inds_deleted = np.argwhere(labels=='.')[:,0]
     f, ax = plt.subplots(figsize = (7,5)) 
     ax.plot(range(30), w[:30], 'o', color='k', markersize=4)
     
-    # x_used_significant = np.array([i for i in range(L) if i not in inds_deleted])
-    # ax.plot(x_used_significant, w[x_used_significant], 'o', color='maroon', markersize=4)
-    # ax.plot(inds_deleted, w[inds_deleted], 'o', color='darkgrey', markersize=4)
-    # ax.plot(range(L,30), w[L:30], 'o', color='k', markersize=4)
     ax.grid(True)
-    # ax.axvline(4.5, color = 'midnightblue', linestyle = '--', linewidth = 1.5, label='Subtropical | Subpolar Gyre')
-    # ax.axvline(7.5, color = 'sienna', linestyle = '--', linewidth = 1.5, label='Subpolar Gyre | Nordic Seas')
-    # ax.axvline(9.5, color = 'skyblue', linestyle = '--', linewidth = 1.5, label = 'Northern | Southern Subtropics')
-    # ax.axvline(10.5, color = 'aqua', linestyle = '--', linewidth = 1.5, label = 'Caribbean Sea')
-    # ax.axvline(14.5, color = 'dodgerblue', linestyle = '--', linewidth = 1.5, label = 'Western Boundary Current incl. Bay of Biscay')
-    # ax.axvline(16.5, color = 'coral', linestyle = '--', linewidth = 1.5, label = 'Greenland Current')
-    # ax.axvline(18.5, color = 'orange', linestyle = '--', linewidth = 1.5, label = 'Barents Sea')
-    # ax.axvline(19.5, color = 'purple', linestyle = '--', linewidth = 1.5, label = 'Bay of Biscay')
-    # plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.07), fancybox=True, shadow=False, ncol=2)
     ax.set_ylabel(r'$\lambda$')
     ax.set_title(r'Spectrum of $L_s$', size=14) 
     
