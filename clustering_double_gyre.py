@@ -20,8 +20,7 @@ import itertools
 
 ratio_delete = 0 #Minimum amount of time info deleted in each of the remaining 500 trajectories.
                 #only needed for incomplete cases, where this varable is re-defined
-T_G = 201 #time used to construct matrices. Set to 1 to constrain to double gyre period.
-n=1
+T_G = 201
 
 """
 Here are the options for the different figures. Please comment the blocks you don't need.
@@ -32,26 +31,34 @@ Non-autonomous case
 """
 drifter_trajectory_data = "double_gyre_nonautonomous_trajectories.npz"
 
-#Complete data set (fig 3.)
+# #Complete data set (fig 3.)
+# incomplete = False
+# filename = './figures/dg_complete_dxdy_004_T' + str(T_G)
+# K_clusters=15
+# dx, dy = 0.04, 0.04
+# figlines = 2
+
+#Complete data set, shorter time (fig 3.)
 incomplete = False
+T_G = 101
 filename = './figures/dg_complete_dxdy_004_T' + str(T_G)
 K_clusters=15
 dx, dy = 0.04, 0.04
 figlines = 2
 
-# # Complete data set, coarse binning (fig. 4)
+# Complete data set, coarse binning (fig. 4)
 # incomplete = False
 # filename = './figures/dg_complete_dxdy_066_0333_' + str(T_G)
 # K_clusters=5
 # dx, dy = 2/3., 1./3.
 # figlines = 1
     
-# # Incomplete data set (fig. 5)
+# Incomplete data set (fig. 5)
 # incomplete = True
 # filename = './figures/dg_incomplete_dxdy_004_T' + str(T_G)
-# K_clusters=15
+# K_clusters=10
 # dx, dy = 0.04, 0.04
-# dx_incomplete, dy_incomplete = .3, .3
+# dx_incomplete, dy_incomplete = .4, .4
 # ratio_delete = 0.8
 # figlines = 1
 
@@ -74,7 +81,6 @@ Autonomous case (figs. B1, B2)
 # K_clusters=16
 # dx, dy = 0.15, 0.15
 # figlines = 1
-
 
 
 
@@ -115,7 +121,7 @@ for i in range(T): C.append(drifter_data.compute_C(i))
 
 #define G(tau)
 G = C[0]
-for i in range(n, T_G,n): G += C[i]
+for i in range(1, T_G): G += C[i]
 
 F = bipartite_network(G.tocsr())
 u, s, v = F.projection_laplacian_spectrum(K=K_clusters)
