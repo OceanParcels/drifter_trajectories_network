@@ -560,7 +560,7 @@ class undirected_network(object):
                                                sub_cluster_volume, sub_cluster_label)
         
     
-    def compute_laplacian_spectrum(self, K=20, plot=False):
+    def compute_laplacian_spectrum(self, K=10, plot=False):
         """
         Comput eigenvectors for clustering from symmetric nocmralized Laplacian
         """
@@ -580,7 +580,6 @@ class undirected_network(object):
             plt.show()
         
         self.Lsym_eigenvectors =  D_sqrt_inv.dot(v)
-        self.Lsym_eigenvalues =  D_sqrt_inv.dot(v)
         return w, D_sqrt_inv.dot(v)
    
 
@@ -597,7 +596,7 @@ class undirected_network(object):
         return stays_in_1 / cluster_volume_1 + stays_in_2 / cluster_volume_2 - self.rho
 
 
-    def hierarchical_clustering_ShiMalik(self, K, plots=False):
+    def hierarchical_clustering_ShiMalik(self, K, plots=False, Ncrange = 100):
         """
         Implementation of hierarchical clustering according to Shi & Malik 2000.
         At each iteration, one cluster is added, minimizing the global NCut. We implement this
@@ -615,38 +614,47 @@ class undirected_network(object):
             
             for j in range(len(networks[i-1])):
                 nw = networks[i-1][j]
-                if nw.N<100: 
+                if nw.N<100:  #stop if a network is too small
                     optimal_drhos.append(np.nan)
                     optimal_cutoffs.append(np.nan)
                     continue
         
                 nw.compute_laplacian_spectrum()
                 V_fiedler = nw.Lsym_eigenvectors[:,1]
-                c_range = np.linspace(np.min(V_fiedler), np.max(V_fiedler), 100)[1:]
+                c_range = np.linspace(np.min(V_fiedler), np.max(V_fiedler), Ncrange)[1:]
                 
                 drhos = []
                 for c in c_range:
-                
                     indices_1 = np.argwhere(V_fiedler<=c)[:,0]
                     indices_2 = np.argwhere(V_fiedler>c)[:,0]
                     drhos.append(nw.drho_split(indices_1, indices_2))
                     
                 drhos = np.array(drhos)
+                
+
                 if plots:
                     plt.plot(c_range, drhos)
                     plt.yscale('log')
                     plt.grid(True)
-                    plt.title(r'$\Delta \rho_{global}$ for different cutoffs. Network' + str(i) + str(j))
+                    plt.title(r'$\Delta \rho_{global}$ for different cutoffs. Network ' + str(i) + '-'+ str(j))
                     plt.show()
                 cutoff_opt = c_range[np.nanargmax(drhos)]
                 print('Choosing as cutoff: ', str(cutoff_opt))
                 
+                # save result of first iteration
+                if i==1:
+                    drhos_split1 = drhos
+                    cutoff_split1 = c_range
+                    cutoff_opt_split1 = cutoff_opt
+                                        
                 optimal_drhos.append(np.nanmax(drhos))
                 optimal_cutoffs.append(cutoff_opt)
             
             i_cluster = np.nanargmax(optimal_drhos)
-            print('Splitting cluster ', i_cluster+1)
             cutoff_cluster = optimal_cutoffs[np.nanargmax(optimal_drhos)]
+            print('Splitting cluster ', i_cluster+1)
+            print("Optimal cutoff: ", cutoff_cluster)
+                
             nw_to_split = networks[i-1][i_cluster]
             V_fiedler = nw_to_split.Lsym_eigenvectors[:,1]
             indices_1 = np.argwhere(V_fiedler<=cutoff_cluster)[:,0]
@@ -669,7 +677,7 @@ class undirected_network(object):
             
             old_labels = [nw.cluster_label for nw in networks[i-1]]
             
-            cluster_label_2 = np.max(old_labels)+1
+            cluster_label_2 = np.max(old_labels) + 1
             
             network_children = [undirected_network(adjacency_matrix_1, cluster_indices_1, cluster_volume_1, cluster_label_1), 
                             undirected_network(adjacency_matrix_2, cluster_indices_2, cluster_volume_2, cluster_label_2)]
@@ -679,3 +687,4 @@ class undirected_network(object):
             networks[i] += network_children #append in the end
         
         self.clustered_networks = networks
+        return drhos_split1, cutoff_split1, cutoff_opt_split1
